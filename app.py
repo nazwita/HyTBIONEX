@@ -1,6 +1,7 @@
 import os
 import re
 import html
+import base64
 import textwrap
 import pandas as pd
 import streamlit as st
@@ -33,102 +34,210 @@ if "last_doc_status" not in st.session_state:
 if "last_match_status" not in st.session_state:
     st.session_state.last_match_status = ""
 
-if "input_text" not in st.session_state:
-    st.session_state.input_text = ""
+if "input_text_area" not in st.session_state:
+    st.session_state.input_text_area = ""
 
 if "file_key_suffix" not in st.session_state:
     st.session_state.file_key_suffix = 0
 
 
 def clear_input_text():
-    st.session_state.input_text = ""
+    st.session_state.input_text_area = ""
 
 
 def clear_uploaded_file():
     st.session_state.file_key_suffix += 1
-    st.session_state.input_text = ""
+    st.session_state.input_text_area = ""
 
 
 def clear_text_when_upload():
-    st.session_state.input_text = ""
+    st.session_state.input_text_area = ""
+
+
+# =====================================================
+# BACKGROUND IMAGE OPSIONAL
+# =====================================================
+def get_image_data_url(paths):
+    for path in paths:
+        if os.path.exists(path):
+            try:
+                with open(path, "rb") as f:
+                    encoded = base64.b64encode(f.read()).decode()
+                ext = path.split(".")[-1].lower()
+                if ext == "jpg":
+                    ext = "jpeg"
+                return f"data:image/{ext};base64,{encoded}"
+            except Exception:
+                pass
+    return ""
+
+
+BG_URL = get_image_data_url([
+    "assets/background.png",
+    "assets/herbal-background.png",
+    "background.png",
+    "ChatGPT Image 9 Jul 2026, 05.26.27.png"
+])
+
+if BG_URL:
+    HERO_BG = f"linear-gradient(90deg, rgba(255,255,255,0.92), rgba(255,255,255,0.40)), url('{BG_URL}')"
+else:
+    HERO_BG = "radial-gradient(circle at 70% 30%, #d9f99d 0%, #ecfdf5 35%, #fffaf0 100%)"
 
 
 # =====================================================
 # CSS
 # =====================================================
-st.markdown("""
+st.markdown(f"""
 <style>
-/* BACKGROUND UTAMA */
-.stApp {
-    background: linear-gradient(135deg, #e8f8ec 0%, #f3e8ff 100%);
-}
+.stApp {{
+    background:
+        radial-gradient(circle at top left, rgba(187,247,208,0.55), transparent 32%),
+        radial-gradient(circle at bottom right, rgba(233,213,255,0.75), transparent 35%),
+        linear-gradient(135deg, #f8fff8 0%, #fffaf0 45%, #f3e8ff 100%) !important;
+}}
 
-/* SIDEBAR HIJAU */
-[data-testid="stSidebar"] {
-    background: linear-gradient(180deg, #064e3b 0%, #047857 55%, #059669 100%) !important;
-}
+/* SIDEBAR */
+[data-testid="stSidebar"] {{
+    background:
+        radial-gradient(circle at bottom left, rgba(255,237,213,0.14), transparent 30%),
+        linear-gradient(180deg, #013220 0%, #064e3b 45%, #047857 100%) !important;
+    border-right: 1px solid rgba(255,255,255,0.12);
+}}
 
-[data-testid="stSidebar"] * {
+[data-testid="stSidebar"] * {{
     color: #ffedd5 !important;
-}
+}}
 
-[data-testid="stSidebar"] h1,
+[data-testid="stSidebar"] h1 {{
+    color: #ffffff !important;
+    font-size: 34px !important;
+    font-weight: 900 !important;
+}}
+
 [data-testid="stSidebar"] h2,
-[data-testid="stSidebar"] h3 {
+[data-testid="stSidebar"] h3 {{
     color: #fed7aa !important;
     font-weight: 900 !important;
-}
+}}
 
-/* MENU RADIO SIDEBAR */
-[data-testid="stSidebar"] [role="radiogroup"] label {
-    background: rgba(255, 237, 213, 0.12) !important;
+[data-testid="stSidebar"] [role="radiogroup"] label {{
+    background: rgba(255, 237, 213, 0.10) !important;
     padding: 13px 15px !important;
-    border-radius: 14px !important;
+    border-radius: 15px !important;
     margin-bottom: 9px !important;
-    border: 1px solid rgba(255, 237, 213, 0.18) !important;
-}
+    border: 1px solid rgba(255, 237, 213, 0.14) !important;
+}}
 
-[data-testid="stSidebar"] [role="radiogroup"] label:hover {
-    background: rgba(249, 115, 22, 0.30) !important;
+[data-testid="stSidebar"] [role="radiogroup"] label:hover {{
+    background: rgba(249, 115, 22, 0.32) !important;
     transform: translateX(4px);
-}
+}}
 
-/* JUDUL UTAMA */
-.main-title {
-    background: linear-gradient(135deg, #0b7a45, #129157);
-    padding: 35px;
-    border-radius: 25px;
-    text-align: center;
+/* HEADER MOCKUP */
+.top-header {{
+    background:
+        linear-gradient(135deg, rgba(1,50,32,0.98), rgba(6,78,59,0.96), rgba(4,120,87,0.92));
+    padding: 26px 32px;
+    border-radius: 26px;
     color: white;
-    margin-bottom: 25px;
-    box-shadow: 0 8px 20px rgba(0,0,0,0.18);
-}
+    margin-bottom: 22px;
+    box-shadow: 0 18px 40px rgba(0,0,0,0.18);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}}
 
-.main-title h1 {
-    font-size: 54px;
+.top-header h1 {{
+    margin: 0;
+    font-size: 42px;
     font-weight: 900;
-    margin-bottom: 8px;
-}
+}}
 
-.orange-card {
+.top-header p {{
+    margin: 4px 0 0 0;
+    font-size: 17px;
+    color: #ecfdf5;
+}}
+
+.status-pill {{
+    background: rgba(255,255,255,0.10);
+    padding: 12px 18px;
+    border-radius: 16px;
+    border: 1px solid rgba(255,255,255,0.14);
+    font-weight: 800;
+    color: #ffedd5;
+}}
+
+/* HERO BOTANICAL */
+.hero {{
+    background: {HERO_BG};
+    background-size: cover;
+    background-position: center;
+    padding: 34px;
+    border-radius: 28px;
+    margin-bottom: 22px;
+    box-shadow: 0 18px 38px rgba(0,0,0,0.12);
+    border: 1px solid rgba(6,78,59,0.10);
+}}
+
+.hero h1 {{
+    color: #064e3b;
+    font-size: 56px;
+    font-weight: 900;
+    margin-bottom: 6px;
+}}
+
+.hero h2 {{
+    color: #0b7a45;
+    font-size: 25px;
+    font-weight: 900;
+}}
+
+.hero p {{
+    color: #12372a;
+    font-size: 17px;
+    line-height: 1.7;
+}}
+
+.preview-card {{
+    background: rgba(255,255,255,0.82);
+    border: 1px solid rgba(6,78,59,0.14);
+    border-radius: 24px;
+    padding: 22px;
+    box-shadow: 0 12px 26px rgba(0,0,0,0.10);
+}}
+
+.orange-card {{
     background: linear-gradient(135deg, #f97316, #fb923c);
     padding: 25px;
     border-radius: 22px;
     color: white;
     margin-bottom: 25px;
     box-shadow: 0 8px 18px rgba(0,0,0,0.15);
-}
+}}
 
-.green-card {
-    background: linear-gradient(135deg, #0b7a45, #129157);
-    padding: 25px;
+.green-card {{
+    background: linear-gradient(135deg, #064e3b, #0b7a45, #059669);
+    padding: 24px;
     border-radius: 22px;
     color: white;
     margin-bottom: 15px;
-    box-shadow: 0 8px 18px rgba(0,0,0,0.15);
-}
+    box-shadow: 0 14px 28px rgba(0,0,0,0.16);
+    position: relative;
+}}
 
-.lilac-card {
+.green-card h2 {{
+    margin: 0 0 8px 0;
+    color: white;
+}}
+
+.green-card p {{
+    margin: 0;
+    color: #ecfdf5;
+}}
+
+.lilac-card {{
     background: #f3e8ff;
     padding: 22px;
     border-radius: 20px;
@@ -136,10 +245,19 @@ st.markdown("""
     color: #111111;
     margin-top: 18px;
     margin-bottom: 18px;
-    box-shadow: 0 8px 18px rgba(0,0,0,0.12);
-}
+    box-shadow: 0 8px 18px rgba(0,0,0,0.10);
+}}
 
-.result-box {
+.white-card {{
+    background: rgba(255,255,255,0.90);
+    padding: 22px;
+    border-radius: 22px;
+    border: 1px solid rgba(6,78,59,0.10);
+    margin-bottom: 18px;
+    box-shadow: 0 10px 24px rgba(0,0,0,0.10);
+}}
+
+.result-box {{
     background: white;
     border-left: 8px solid #0b7a45;
     padding: 18px;
@@ -147,84 +265,145 @@ st.markdown("""
     margin-bottom: 12px;
     color: #111111;
     box-shadow: 0 6px 14px rgba(0,0,0,0.10);
-}
+}}
 
-.relation-box {
+.relation-box {{
     background: #fff7ed;
     border: 2px solid #fb923c;
     padding: 18px;
     border-radius: 16px;
     margin-bottom: 12px;
     color: #111111;
-}
+}}
 
-.kg-box {
+.kg-box {{
     background: radial-gradient(circle, #f3e8ff, #ffffff);
     border: 3px dashed #a855f7;
     padding: 22px;
     border-radius: 20px;
     margin-top: 18px;
     color: #111111;
-}
+}}
 
-/* INPUT TEXT AREA JADI LILAC */
-textarea {
+/* INPUT DAN UPLOAD JADI LILAC, BUKAN HITAM */
+textarea {{
     background-color: #f3e8ff !important;
     color: #111111 !important;
     border: 2px solid #c084fc !important;
     border-radius: 16px !important;
-}
+}}
 
-textarea::placeholder {
+textarea::placeholder {{
     color: #6b4b84 !important;
-}
+}}
 
-/* FILE UPLOADER JADI LILAC */
-[data-testid="stFileUploader"] section {
+[data-testid="stFileUploader"] section {{
     background-color: #f3e8ff !important;
     border: 2px dashed #a855f7 !important;
     border-radius: 16px !important;
     color: #111111 !important;
-}
+}}
 
-[data-testid="stFileUploader"] section * {
+[data-testid="stFileUploader"] section * {{
     color: #111111 !important;
-}
+}}
 
-[data-testid="stFileUploader"] button {
+[data-testid="stFileUploader"] button {{
     background: #a855f7 !important;
     color: white !important;
     border-radius: 12px !important;
     border: none !important;
     font-weight: 800 !important;
-}
+}}
 
-/* SEMUA TOMBOL TIDAK HITAM */
-.stButton > button {
+.stButton > button {{
     background: linear-gradient(135deg, #f97316, #fb923c) !important;
     color: white !important;
     border: none !important;
     border-radius: 14px !important;
     font-weight: 900 !important;
     padding: 0.75rem 1rem !important;
-}
+}}
 
-/* TOMBOL X */
-.x-button button {
-    background: #a855f7 !important;
-    color: white !important;
+.small-x button {{
+    width: 34px !important;
+    height: 34px !important;
+    min-width: 34px !important;
     border-radius: 50% !important;
-    width: 42px !important;
-    height: 42px !important;
     padding: 0 !important;
-    font-size: 22px !important;
+    font-size: 18px !important;
+    background: #fb923c !important;
+    color: white !important;
     border: 2px solid white !important;
-}
+    margin-top: 3px !important;
+}}
 
-.small-note {
+.metric-card {{
+    background: rgba(255,255,255,0.90);
+    padding: 17px;
+    border-radius: 18px;
+    border: 1px solid rgba(6,78,59,0.10);
+    box-shadow: 0 8px 18px rgba(0,0,0,0.08);
+}}
+
+.metric-card h4 {{
+    margin: 0;
+    color: #047857;
+}}
+
+.metric-card h2 {{
+    margin: 5px 0 0 0;
+    color: #16a34a;
+}}
+
+.down-card {{
+    background: rgba(255,255,255,0.92);
+    border-radius: 22px;
+    padding: 20px;
+    border: 1px solid rgba(6,78,59,0.12);
+    box-shadow: 0 12px 26px rgba(0,0,0,0.10);
+    min-height: 310px;
+}}
+
+.down-card h3 {{
+    color: #064e3b;
+    font-size: 19px;
+    font-weight: 900;
+}}
+
+.down-card p {{
+    color: #12372a;
+    font-size: 14px;
+}}
+
+.mini-table {{
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+}}
+
+.mini-table td, .mini-table th {{
+    border: 1px solid #d1d5db;
+    padding: 5px;
+    color: #111;
+}}
+
+.mini-flow {{
+    background: #fff7ed;
+    border: 1px solid #fdba74;
+    padding: 8px;
+    border-radius: 10px;
+    text-align: center;
+    margin-bottom: 7px;
+    color: #111;
+    font-size: 13px;
+    font-weight: 700;
+}}
+
+.small-note {{
     font-size: 15px;
     color: #333333;
-}
+}}
 </style>
 """, unsafe_allow_html=True)
 
@@ -269,22 +448,16 @@ def find_dataset_file():
     if os.path.exists(DEFAULT_DATASET):
         return DEFAULT_DATASET
 
-    excel_files = []
-    for f in os.listdir("."):
-        if f.lower().endswith((".xlsx", ".xls")):
-            excel_files.append(f)
+    excel_files = [f for f in os.listdir(".") if f.lower().endswith((".xlsx", ".xls"))]
 
     for f in excel_files:
         if "data" in f.lower():
             return f
 
-    if excel_files:
-        return excel_files[0]
-
-    return ""
+    return excel_files[0] if excel_files else ""
 
 
-@st.cache_data
+@st.cache_data(show_spinner=False)
 def load_dataset():
     dataset_path = find_dataset_file()
 
@@ -354,18 +527,9 @@ def read_uploaded_file(uploaded_file):
 
 
 def score_match(row, search_text):
-    nama_tanaman = clean_text(get_col(row, [
-        "Nama Tanaman", "Nama_Tanaman", "Tanaman", "Nama"
-    ]))
-
-    nama_latin = clean_text(get_col(row, [
-        "Nama Latin", "Nama_Latin", "Latin"
-    ]))
-
-    nama_lokal = clean_text(get_col(row, [
-        "Nama Lokal/Daerah", "Nama Lokal", "Nama_Daerah",
-        "Bahasa_Daerah", "Bahasa Daerah"
-    ]))
+    nama_tanaman = clean_text(get_col(row, ["Nama Tanaman", "Nama_Tanaman", "Tanaman", "Nama"]))
+    nama_latin = clean_text(get_col(row, ["Nama Latin", "Nama_Latin", "Latin"]))
+    nama_lokal = clean_text(get_col(row, ["Nama Lokal/Daerah", "Nama Lokal", "Nama_Daerah", "Bahasa_Daerah", "Bahasa Daerah"]))
 
     score = 0
 
@@ -423,42 +587,50 @@ def make_result(row, input_text):
         }
 
     return {
-        "Nama Tanaman": get_col(row, [
-            "Nama Tanaman", "Nama_Tanaman", "Tanaman", "Nama"
-        ]),
-        "Nama Latin": get_col(row, [
-            "Nama Latin", "Nama_Latin", "Latin"
-        ]),
-        "Nama Lokal/Daerah": get_col(row, [
-            "Nama Lokal/Daerah", "Nama Lokal", "Nama_Daerah",
-            "Bahasa_Daerah", "Bahasa Daerah"
-        ]),
-        "Bagian Tanaman": get_col(row, [
-            "Bagian Tanaman", "Bagian_Tanaman", "Bagian Digunakan",
-            "Bagian_Digunakan", "Bagian"
-        ]),
-        "Zat Bioaktif": get_col(row, [
-            "Zat Bioaktif", "Senyawa Bioaktif", "Senyawa_Bioaktif",
-            "Compound", "Senyawa", "Kandungan", "Kandungan Kimia"
-        ]),
-        "Khasiat/Efek Terapeutik": get_col(row, [
-            "Khasiat/Efek Terapeutik", "Khasiat", "Benefit",
-            "Biological_Activity", "Aktivitas Farmakologis", "Manfaat"
-        ]),
-        "Cara Pengolahan": get_col(row, [
-            "Cara Pengolahan", "Cara_Pengolahan", "Pengolahan", "Cara Pemakaian"
-        ]),
-        "Komposisi/Dosis": get_col(row, [
-            "Komposisi/Dosis", "Komposisi /Dosis", "Dosis", "Komposisi"
-        ]),
-        "Sumber Data": get_col(row, [
-            "Sumber Data", "Sumber_Data", "Sumber", "Referensi"
-        ])
+        "Nama Tanaman": get_col(row, ["Nama Tanaman", "Nama_Tanaman", "Tanaman", "Nama"]),
+        "Nama Latin": get_col(row, ["Nama Latin", "Nama_Latin", "Latin"]),
+        "Nama Lokal/Daerah": get_col(row, ["Nama Lokal/Daerah", "Nama Lokal", "Nama_Daerah", "Bahasa_Daerah", "Bahasa Daerah"]),
+        "Bagian Tanaman": get_col(row, ["Bagian Tanaman", "Bagian_Tanaman", "Bagian Digunakan", "Bagian_Digunakan", "Bagian"]),
+        "Zat Bioaktif": get_col(row, ["Zat Bioaktif", "Senyawa Bioaktif", "Senyawa_Bioaktif", "Compound", "Senyawa", "Kandungan", "Kandungan Kimia"]),
+        "Khasiat/Efek Terapeutik": get_col(row, ["Khasiat/Efek Terapeutik", "Khasiat", "Benefit", "Biological_Activity", "Aktivitas Farmakologis", "Manfaat"]),
+        "Cara Pengolahan": get_col(row, ["Cara Pengolahan", "Cara_Pengolahan", "Pengolahan", "Cara Pemakaian"]),
+        "Komposisi/Dosis": get_col(row, ["Komposisi/Dosis", "Komposisi /Dosis", "Dosis", "Komposisi"]),
+        "Sumber Data": get_col(row, ["Sumber Data", "Sumber_Data", "Sumber", "Referensi"])
     }
 
 
+def run_extraction(teks, dokumen, dataset_df, dataset_status):
+    progress = st.progress(0)
+    status = st.empty()
+
+    status.text("Memulai proses ekstraksi... 10%")
+    progress.progress(10)
+
+    status.text("Membaca input dan dokumen... 40%")
+    doc_text, doc_status = read_uploaded_file(dokumen)
+    progress.progress(40)
+
+    search_text = clean_text(teks) + " " + clean_text(doc_text)
+    status.text("Mencocokkan entitas dengan dataset... 75%")
+    progress.progress(75)
+
+    best_row, match_status = find_best_row(dataset_df, search_text)
+    result = make_result(best_row, teks)
+
+    status.text("Membangun hasil ekstraksi... 100%")
+    progress.progress(100)
+
+    st.session_state.last_result = result
+    st.session_state.last_dataset_status = dataset_status
+    st.session_state.last_doc_status = doc_status
+    st.session_state.last_match_status = match_status
+
+    st.success("Proses ekstraksi selesai.")
+    return result, doc_status, match_status
+
+
 # =====================================================
-# OUTPUT
+# RENDER OUTPUT
 # =====================================================
 def show_result_card(icon, title, value):
     st.markdown(
@@ -506,25 +678,25 @@ def render_results(result, dataset_status, doc_status, match_status):
 
 
 def render_relation(result):
-    st.markdown("## 🔗 Bioactive Relation Extraction")
+    st.markdown("## 🔗 Ekstraksi Relasi Bioaktif")
     st.markdown(
         f"""
         <div class="relation-box">
-            <p><b>{safe(result["Nama Tanaman"])}</b> → has_latin_name → <b>{safe(result["Nama Latin"])}</b></p>
-            <p><b>{safe(result["Nama Tanaman"])}</b> → has_local_name → <b>{safe(result["Nama Lokal/Daerah"])}</b></p>
-            <p><b>{safe(result["Nama Tanaman"])}</b> → uses_part → <b>{safe(result["Bagian Tanaman"])}</b></p>
-            <p><b>{safe(result["Nama Tanaman"])}</b> → contains_bioactive_compound → <b>{safe(result["Zat Bioaktif"])}</b></p>
-            <p><b>{safe(result["Nama Tanaman"])}</b> → has_therapeutic_effect → <b>{safe(result["Khasiat/Efek Terapeutik"])}</b></p>
-            <p><b>{safe(result["Nama Tanaman"])}</b> → processed_by → <b>{safe(result["Cara Pengolahan"])}</b></p>
-            <p><b>{safe(result["Nama Tanaman"])}</b> → has_dosage → <b>{safe(result["Komposisi/Dosis"])}</b></p>
-            <p><b>{safe(result["Nama Tanaman"])}</b> → sourced_from → <b>{safe(result["Sumber Data"])}</b></p>
+            <p><b>{safe(result["Nama Tanaman"])}</b> → memiliki nama latin → <b>{safe(result["Nama Latin"])}</b></p>
+            <p><b>{safe(result["Nama Tanaman"])}</b> → memiliki nama lokal/daerah → <b>{safe(result["Nama Lokal/Daerah"])}</b></p>
+            <p><b>{safe(result["Nama Tanaman"])}</b> → menggunakan bagian → <b>{safe(result["Bagian Tanaman"])}</b></p>
+            <p><b>{safe(result["Nama Tanaman"])}</b> → mengandung senyawa bioaktif → <b>{safe(result["Zat Bioaktif"])}</b></p>
+            <p><b>{safe(result["Nama Tanaman"])}</b> → memiliki khasiat → <b>{safe(result["Khasiat/Efek Terapeutik"])}</b></p>
+            <p><b>{safe(result["Nama Tanaman"])}</b> → diolah dengan cara → <b>{safe(result["Cara Pengolahan"])}</b></p>
+            <p><b>{safe(result["Nama Tanaman"])}</b> → memiliki dosis/komposisi → <b>{safe(result["Komposisi/Dosis"])}</b></p>
+            <p><b>{safe(result["Nama Tanaman"])}</b> → bersumber dari → <b>{safe(result["Sumber Data"])}</b></p>
         </div>
         """,
         unsafe_allow_html=True
     )
 
 
-def shorten_label(text, max_len=18):
+def shorten_label(text, max_len=28):
     text = str(text)
     if text.lower() in ["", "nan", "none", "belum terdeteksi"]:
         return "Belum terdeteksi"
@@ -533,8 +705,8 @@ def shorten_label(text, max_len=18):
     return text[:max_len] + "..."
 
 
-def wrap_label(text, width=16):
-    text = shorten_label(text, 32)
+def wrap_label(text, width=14):
+    text = shorten_label(text, 34)
     return "\n".join(textwrap.wrap(text, width=width))
 
 
@@ -548,57 +720,56 @@ def render_kg(result):
     dosis = result["Komposisi/Dosis"] if result["Komposisi/Dosis"] else "Dosis"
     sumber = result["Sumber Data"] if result["Sumber Data"] else "Sumber Data"
 
-    st.markdown("## 🕸️ Enhanced Herb Knowledge Graph 2.0")
+    st.markdown("## 🕸️ Visualisasi HerbKG 2.0")
 
     G = nx.DiGraph()
-    center = wrap_label(tanaman, 14)
+
+    node_tanaman = "Tanaman\n" + wrap_label(tanaman, 14)
+    node_latin = "Nama Latin\n" + wrap_label(latin, 16)
+    node_bagian = "Bagian Digunakan\n" + wrap_label(bagian, 14)
+    node_zat = "Senyawa Bioaktif\n" + wrap_label(zat, 14)
+    node_khasiat = "Khasiat\n" + wrap_label(khasiat, 14)
+    node_olah = "Cara Pengolahan\n" + wrap_label(olah, 14)
+    node_dosis = "Dosis/Komposisi\n" + wrap_label(dosis, 14)
+    node_sumber = "Sumber Data\n" + wrap_label(sumber, 18)
 
     nodes = {
-        center: "plant",
-        wrap_label(latin, 18): "latin",
-        wrap_label(bagian, 16): "part",
-        wrap_label(zat, 16): "compound",
-        wrap_label(khasiat, 16): "effect",
-        wrap_label(olah, 16): "processing",
-        wrap_label(dosis, 16): "dose",
-        wrap_label(sumber, 22): "source"
+        node_tanaman: "tanaman",
+        node_latin: "latin",
+        node_bagian: "bagian",
+        node_zat: "senyawa",
+        node_khasiat: "khasiat",
+        node_olah: "pengolahan",
+        node_dosis: "dosis",
+        node_sumber: "sumber"
     }
 
     for node, node_type in nodes.items():
         G.add_node(node, node_type=node_type)
 
-    latin_node = wrap_label(latin, 18)
-    bagian_node = wrap_label(bagian, 16)
-    zat_node = wrap_label(zat, 16)
-    khasiat_node = wrap_label(khasiat, 16)
-    olah_node = wrap_label(olah, 16)
-    dosis_node = wrap_label(dosis, 16)
-    sumber_node = wrap_label(sumber, 22)
-
     edges = [
-        (center, latin_node, "has_latin_name"),
-        (center, bagian_node, "uses_part"),
-        (center, zat_node, "contains"),
-        (center, khasiat_node, "has_effect"),
-        (center, olah_node, "processed_by"),
-        (center, dosis_node, "has_dosage"),
-        (center, sumber_node, "sourced_from"),
-        (zat_node, khasiat_node, "contributes_to"),
-        (bagian_node, zat_node, "contains_compound"),
+        (node_tanaman, node_latin, "nama latin"),
+        (node_tanaman, node_bagian, "bagian digunakan"),
+        (node_tanaman, node_zat, "mengandung"),
+        (node_zat, node_khasiat, "mendukung khasiat"),
+        (node_tanaman, node_khasiat, "memiliki khasiat"),
+        (node_tanaman, node_olah, "cara pengolahan"),
+        (node_tanaman, node_dosis, "dosis/komposisi"),
+        (node_tanaman, node_sumber, "sumber data")
     ]
 
     for source, target, relation in edges:
         G.add_edge(source, target, label=relation)
 
     pos = {
-        center: (0.0, 0.2),
-        latin_node: (-2.5, 1.4),
-        bagian_node: (2.5, 1.4),
-        zat_node: (-2.7, -0.3),
-        khasiat_node: (0.0, -1.5),
-        olah_node: (2.7, -0.3),
-        dosis_node: (-2.4, -1.9),
-        sumber_node: (2.3, -1.9),
+        node_tanaman: (0, 0),
+        node_latin: (-2.5, 1.6),
+        node_bagian: (2.5, 1.6),
+        node_zat: (-2.7, 0),
+        node_khasiat: (0, -1.8),
+        node_olah: (2.7, 0),
+        node_dosis: (-2.2, -1.8),
+        node_sumber: (2.2, -1.8),
     }
 
     node_colors = []
@@ -608,24 +779,24 @@ def render_kg(result):
     for node in G.nodes():
         node_type = G.nodes[node]["node_type"]
 
-        if node_type == "plant":
+        if node_type == "tanaman":
             node_colors.append("#ff5a5f")
             node_edge_colors.append("#ff2028")
-            node_sizes.append(3600)
-        elif node_type in ["compound", "dose"]:
+            node_sizes.append(5400)
+        elif node_type == "senyawa":
             node_colors.append("#ffd6a5")
             node_edge_colors.append("#f97316")
-            node_sizes.append(3000)
-        elif node_type in ["effect", "latin", "source"]:
+            node_sizes.append(5200)
+        elif node_type in ["latin", "khasiat", "sumber"]:
             node_colors.append("#f3c4fb")
             node_edge_colors.append("#a855f7")
-            node_sizes.append(3300)
+            node_sizes.append(5300)
         else:
-            node_colors.append("#70d99d")
-            node_edge_colors.append("#00a85a")
-            node_sizes.append(3000)
+            node_colors.append("#86efac")
+            node_edge_colors.append("#16a34a")
+            node_sizes.append(5000)
 
-    fig, ax = plt.subplots(figsize=(12, 8))
+    fig, ax = plt.subplots(figsize=(13, 8))
     fig.patch.set_facecolor("#fbf7ff")
     ax.set_facecolor("#fbf7ff")
 
@@ -634,11 +805,11 @@ def render_kg(result):
         pos,
         ax=ax,
         arrows=True,
-        arrowsize=22,
+        arrowsize=24,
         arrowstyle="-|>",
-        width=2.2,
+        width=2.4,
         edge_color="#9ca3af",
-        connectionstyle="arc3,rad=0.10"
+        connectionstyle="arc3,rad=0.08"
     )
 
     nx.draw_networkx_nodes(
@@ -647,7 +818,7 @@ def render_kg(result):
         ax=ax,
         node_color=node_colors,
         edgecolors=node_edge_colors,
-        linewidths=3,
+        linewidths=3.5,
         node_size=node_sizes
     )
 
@@ -655,7 +826,7 @@ def render_kg(result):
         G,
         pos,
         ax=ax,
-        font_size=11,
+        font_size=9.3,
         font_weight="bold",
         font_color="#111111"
     )
@@ -667,81 +838,189 @@ def render_kg(result):
         pos,
         edge_labels=edge_labels,
         ax=ax,
-        font_size=9,
+        font_size=8.3,
         font_color="#111111",
-        rotate=True,
+        rotate=False,
         label_pos=0.55,
         bbox=dict(
-            boxstyle="round,pad=0.20",
-            fc="#fbf7ff",
-            ec="none",
-            alpha=0.85
+            boxstyle="round,pad=0.25",
+            fc="#ffffff",
+            ec="#e5e7eb",
+            alpha=0.95
         )
     )
 
     ax.set_title(
-        "Enhanced Herb Knowledge Graph 2.0",
-        fontsize=18,
+        "HerbKG 2.0: Relasi Tanaman Herbal, Senyawa Bioaktif, Khasiat, dan Sumber Data",
+        fontsize=16,
         fontweight="bold",
         color="#0b7a45",
-        pad=20
+        pad=18
     )
 
+    ax.set_xlim(-3.4, 3.4)
+    ax.set_ylim(-2.6, 2.3)
     ax.axis("off")
     plt.tight_layout()
+
     st.pyplot(fig, use_container_width=True)
 
 
+def render_downstream():
+    st.markdown("""
+    <div class="white-card">
+        <h2 style="color:#064e3b;">📦 Aplikasi Downstream</h2>
+        <p>Bagian ini menampilkan pemanfaatan hasil ekstraksi dan HerbKG 2.0 untuk analisis lanjutan.</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    c1, c2, c3, c4 = st.columns(4)
+
+    with c1:
+        st.markdown("""
+        <div class="down-card">
+            <h3>1. Analisis Deskriptif</h3>
+            <p>Ringkasan statistik tanaman, senyawa, relasi, dan sumber data.</p>
+            <table class="mini-table">
+                <tr><th>Tanaman</th><th>Relasi</th></tr>
+                <tr><td>Kelor</td><td>121</td></tr>
+                <tr><td>Jahe</td><td>98</td></tr>
+                <tr><td>Sirih</td><td>86</td></tr>
+                <tr><td>Kayu Manis</td><td>75</td></tr>
+            </table>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with c2:
+        st.markdown("""
+        <div class="down-card">
+            <h3>2. Query Graf Berbasis Bukti</h3>
+            <p>Menelusuri bukti relasi tanaman, senyawa, khasiat, dan sumber literatur.</p>
+            <table class="mini-table">
+                <tr><th>Entitas</th><th>Relasi</th><th>Bukti</th></tr>
+                <tr><td>Tanaman</td><td>mengandung</td><td>Senyawa</td></tr>
+                <tr><td>Senyawa</td><td>mendukung</td><td>Khasiat</td></tr>
+                <tr><td>Khasiat</td><td>bersumber</td><td>Literatur</td></tr>
+            </table>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with c3:
+        st.markdown("""
+        <div class="down-card">
+            <h3>3. Analisis Kemiripan</h3>
+            <p>Menemukan tanaman herbal yang mirip berdasarkan senyawa dan khasiat.</p>
+            <div class="mini-flow">Kelor → 0,56</div>
+            <div class="mini-flow">Sirih → 0,41</div>
+            <div class="mini-flow">Jahe → 0,39</div>
+            <div class="mini-flow">Kunyit → 0,31</div>
+            <div class="mini-flow">Kayu Manis → 0,28</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with c4:
+        st.markdown("""
+        <div class="down-card">
+            <h3>4. Repurposing Obat Herbal</h3>
+            <p>Prediksi pemanfaatan ulang tanaman herbal berdasarkan relasi graf.</p>
+            <div class="mini-flow">Penyakit → Target Dikenal</div>
+            <div class="mini-flow">Target → Tanaman Terkait</div>
+            <div class="mini-flow">Prediksi Kandidat Herbal</div>
+            <div class="mini-flow">Peringkat Rekomendasi</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+
 # =====================================================
-# SIDEBAR AKTIF
+# SIDEBAR
 # =====================================================
-st.sidebar.markdown("# 🌱 HyTBIONEX")
+st.sidebar.markdown("# 🌿 HyTBIONEX")
+st.sidebar.markdown("Ekstraksi Informasi Bioaktif & HerbKG 2.0")
 st.sidebar.markdown("---")
+st.sidebar.markdown("### ANALISIS DATA")
 
 menu = st.sidebar.radio(
     "Pilih Menu",
     [
-        "🏠 Dashboard Utama",
-        "🌿 Input Data Tanaman",
+        "🏠 Dashboard",
+        "🌿 Input Tanaman",
         "📁 Upload Dokumen",
-        "📋 Hasil Ekstraksi",
+        "📋 Hasil Ekstraksi Entitas",
         "🔗 Relation Extraction",
-        "🕸️ HerbKG 2.0",
-        "📊 Descriptive Analytics",
-        "🔎 Evidence-Based Graph Query",
-        "🧬 Similarity Analysis",
-        "💊 Herbal Recommendation"
+        "🕸️ HerbKG 2.0 Explorer",
+        "📦 Aplikasi Downstream",
+        "📊 Statistik & Analitik",
+        "⚙️ Pengaturan",
+        "ℹ️ Tentang Aplikasi"
     ],
     label_visibility="collapsed"
 )
+
+st.sidebar.markdown("---")
+st.sidebar.markdown("""
+<div class="status-pill">
+    ✅ Sistem Aktif<br>
+    <small>Semua layanan berjalan normal</small>
+</div>
+""", unsafe_allow_html=True)
 
 # =====================================================
 # HEADER
 # =====================================================
 st.markdown("""
-<div class="main-title">
-    <h1>🌿 HyTBIONEX</h1>
-    <h3>Hybrid Transformer for Bioactive Information Extraction</h3>
-    <p>Analisis Bioaktif Tanaman Herbal Indonesia & Enhanced Herb Knowledge Graph 2.0</p>
+<div class="top-header">
+    <div>
+        <h1>🌿 HyTBIONEX</h1>
+        <p>Hybrid Transformer Pipeline</p>
+    </div>
+    <div>
+        <h2 style="margin:0;color:#bbf7d0;">Analisis Bioaktif & HerbKG 2.0</h2>
+        <p>Bioactive Information Extraction & Enhanced Herb Knowledge Graph</p>
+    </div>
+    <div class="status-pill">🟢 Model Status<br>Aktif</div>
 </div>
 """, unsafe_allow_html=True)
 
 dataset_df, dataset_status = load_dataset()
+file_widget_key = f"uploaded_doc_{st.session_state.file_key_suffix}"
+uploaded_active = st.session_state.get(file_widget_key, None) is not None
 
 # =====================================================
-# MENU DASHBOARD
+# DASHBOARD
 # =====================================================
-if menu == "🏠 Dashboard Utama":
-    st.markdown("""
-    <div class="orange-card">
-        <h2>Selamat Datang di HyTBIONEX</h2>
-        <p>
-        Platform cerdas untuk ekstraksi informasi bioaktif tanaman herbal Indonesia
-        berbasis Hybrid Transformer, Bioactive Information Extraction,
-        Named Entity Disambiguation, Relation Extraction, dan Enhanced Herb Knowledge Graph.
-        </p>
-    </div>
-    """, unsafe_allow_html=True)
+if menu == "🏠 Dashboard":
+    left, right = st.columns([2.2, 1])
+
+    with left:
+        st.markdown("""
+        <div class="hero">
+            <h1>HyTBIONEX</h1>
+            <h2>Platform Cerdas Ekstraksi Informasi Bioaktif</h2>
+            <p>
+            Mengintegrasikan pemrosesan bahasa alami, ekstraksi entitas,
+            ekstraksi relasi, dan konstruksi HerbKG 2.0 untuk menemukan
+            potensi bioaktif tanaman herbal Indonesia.
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with right:
+        st.markdown("""
+        <div class="preview-card">
+            <h3 style="color:#064e3b;">Pratinjau HerbKG 2.0</h3>
+            <p style="text-align:center;font-size:18px;">
+            🌿 <b>Tanaman</b><br>
+            ↙️ 🔬 Nama Latin &nbsp;&nbsp; 🍃 Bagian<br>
+            ↘️ 🧪 Senyawa &nbsp;&nbsp; 💚 Khasiat
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
+
+    m1, m2, m3, m4 = st.columns(4)
+    m1.markdown(f"<div class='metric-card'><h4>🌱 Total Data</h4><h2>{len(dataset_df)}</h2></div>", unsafe_allow_html=True)
+    m2.markdown("<div class='metric-card'><h4>🧪 Total Senyawa</h4><h2>Dataset</h2></div>", unsafe_allow_html=True)
+    m3.markdown("<div class='metric-card'><h4>💚 Total Khasiat</h4><h2>Dataset</h2></div>", unsafe_allow_html=True)
+    m4.markdown("<div class='metric-card'><h4>🔗 Relasi</h4><h2>Triplet</h2></div>", unsafe_allow_html=True)
 
     st.markdown(
         f"""
@@ -753,63 +1032,49 @@ if menu == "🏠 Dashboard Utama":
         unsafe_allow_html=True
     )
 
-    c1, c2, c3 = st.columns(3)
-    c1.metric("🌱 Total Data", len(dataset_df))
-    c2.metric("📁 Dataset", "Terkoneksi" if not dataset_df.empty else "Belum")
-    c3.metric("🕸️ HerbKG", "Aktif")
-
+    render_downstream()
 
 # =====================================================
-# MENU INPUT / UPLOAD
+# INPUT / UPLOAD
 # =====================================================
-elif menu in ["🌿 Input Data Tanaman", "📁 Upload Dokumen"]:
-    file_widget_key = f"uploaded_doc_{st.session_state.file_key_suffix}"
-    dokumen_sebelumnya = st.session_state.get(file_widget_key, None)
-
+elif menu in ["🌿 Input Tanaman", "📁 Upload Dokumen"]:
     col1, col2 = st.columns(2)
 
     with col1:
-        head1, x1 = st.columns([10, 1])
-        with head1:
+        h1, b1 = st.columns([12, 1])
+        with h1:
             st.markdown("""
             <div class="green-card">
-                <h2>🌿 1. Input Data Tanaman</h2>
-                <p>Masukkan nama tanaman atau kalimat artikel herbal.</p>
+                <h2>🌿 1. Input Kata / Kalimat</h2>
+                <p>Masukkan nama lokal tanaman atau kalimat deskriptif.</p>
             </div>
             """, unsafe_allow_html=True)
-        with x1:
-            st.markdown('<div class="x-button">', unsafe_allow_html=True)
+        with b1:
+            st.markdown('<div class="small-x">', unsafe_allow_html=True)
             st.button("×", key="clear_input", on_click=clear_input_text)
             st.markdown('</div>', unsafe_allow_html=True)
 
-        if dokumen_sebelumnya is not None:
-            st.markdown("""
-            <div class="lilac-card">
-                <h3>📁 Mode Dokumen Aktif</h3>
-                <p>Input teks disembunyikan karena Ibu sedang menggunakan upload dokumen.
-                Klik tombol X pada panel upload jika ingin kembali ke input teks.</p>
-            </div>
-            """, unsafe_allow_html=True)
+        if uploaded_active:
             teks = ""
         else:
             teks = st.text_area(
                 "Input Data Tanaman",
-                placeholder="Contoh: Kelor, Sirih, Jahe, Kunyit, Kayu Manis, atau kalimat artikel herbal",
+                placeholder="Contoh: Jahe, Kunyit, Sambiloto, Kayu Manis...",
                 height=180,
-                key="input_text"
+                key="input_text_area"
             )
 
     with col2:
-        head2, x2 = st.columns([10, 1])
-        with head2:
+        h2, b2 = st.columns([12, 1])
+        with h2:
             st.markdown("""
             <div class="green-card">
-                <h2>📁 2. Upload Dokumen Artikel / Dataset</h2>
-                <p>Upload PDF, TXT, CSV, atau Excel.</p>
+                <h2>📁 2. Upload Dokumen</h2>
+                <p>Unggah dokumen untuk diekstraksi informasinya.</p>
             </div>
             """, unsafe_allow_html=True)
-        with x2:
-            st.markdown('<div class="x-button">', unsafe_allow_html=True)
+        with b2:
+            st.markdown('<div class="small-x">', unsafe_allow_html=True)
             st.button("×", key="clear_file", on_click=clear_uploaded_file)
             st.markdown('</div>', unsafe_allow_html=True)
 
@@ -820,46 +1085,16 @@ elif menu in ["🌿 Input Data Tanaman", "📁 Upload Dokumen"]:
             on_change=clear_text_when_upload
         )
 
-    if st.button("🔍 PROSES EKSTRAKSI", use_container_width=True):
-        progress = st.progress(0)
-        status = st.empty()
-
-        status.text("Memulai proses ekstraksi... 10%")
-        progress.progress(10)
-
-        status.text("Membaca input tanaman... 30%")
-        progress.progress(30)
-
-        doc_text, doc_status = read_uploaded_file(dokumen)
-        status.text("Membaca dokumen... 50%")
-        progress.progress(50)
-
-        search_text = clean_text(teks) + " " + clean_text(doc_text)
-        status.text("Mencocokkan entitas dengan dataset... 75%")
-        progress.progress(75)
-
-        best_row, match_status = find_best_row(dataset_df, search_text)
-        result = make_result(best_row, teks)
-
-        status.text("Membangun hasil ekstraksi... 100%")
-        progress.progress(100)
-
-        st.session_state.last_result = result
-        st.session_state.last_dataset_status = dataset_status
-        st.session_state.last_doc_status = doc_status
-        st.session_state.last_match_status = match_status
-
-        st.success("Proses ekstraksi selesai.")
-
+    if st.button("🔎 Proses Analisis", use_container_width=True):
+        result, doc_status, match_status = run_extraction(teks, dokumen, dataset_df, dataset_status)
         render_results(result, dataset_status, doc_status, match_status)
         render_relation(result)
         render_kg(result)
 
-
 # =====================================================
-# MENU HASIL EKSTRAKSI
+# HASIL
 # =====================================================
-elif menu == "📋 Hasil Ekstraksi":
+elif menu == "📋 Hasil Ekstraksi Entitas":
     if st.session_state.last_result:
         render_results(
             st.session_state.last_result,
@@ -868,59 +1103,47 @@ elif menu == "📋 Hasil Ekstraksi":
             st.session_state.last_match_status
         )
     else:
-        st.warning("Belum ada hasil ekstraksi. Buka menu Input Data Tanaman, lalu klik PROSES EKSTRAKSI.")
-
+        st.warning("Belum ada hasil ekstraksi. Buka menu Input Tanaman atau Upload Dokumen, lalu klik Proses Analisis.")
 
 elif menu == "🔗 Relation Extraction":
     if st.session_state.last_result:
         render_relation(st.session_state.last_result)
     else:
-        st.warning("Belum ada hasil relasi. Jalankan proses ekstraksi terlebih dahulu.")
+        st.warning("Belum ada hasil relasi. Jalankan proses analisis terlebih dahulu.")
 
-
-elif menu == "🕸️ HerbKG 2.0":
+elif menu == "🕸️ HerbKG 2.0 Explorer":
     if st.session_state.last_result:
         render_kg(st.session_state.last_result)
     else:
-        st.warning("Belum ada HerbKG. Jalankan proses ekstraksi terlebih dahulu.")
+        st.warning("Belum ada HerbKG. Jalankan proses analisis terlebih dahulu.")
 
+elif menu == "📦 Aplikasi Downstream":
+    render_downstream()
 
-elif menu == "📊 Descriptive Analytics":
+elif menu == "📊 Statistik & Analitik":
+    st.markdown("""
+    <div class="white-card">
+        <h2 style="color:#064e3b;">📊 Statistik & Analitik Dataset</h2>
+        <p>Menampilkan cuplikan dataset herbal yang digunakan dalam sistem.</p>
+    </div>
+    """, unsafe_allow_html=True)
+    st.dataframe(dataset_df.head(30), use_container_width=True)
+
+elif menu == "⚙️ Pengaturan":
     st.markdown("""
     <div class="lilac-card">
-        <h2>📊 Descriptive Analytics</h2>
-        <p>Menu ini digunakan untuk menampilkan ringkasan statistik dataset herbal.</p>
+        <h2>⚙️ Pengaturan Sistem</h2>
+        <p>Menu ini dapat digunakan untuk konfigurasi model, dataset, dan tampilan sistem.</p>
     </div>
     """, unsafe_allow_html=True)
 
-    st.dataframe(dataset_df.head(20), use_container_width=True)
-
-
-elif menu == "🔎 Evidence-Based Graph Query":
+elif menu == "ℹ️ Tentang Aplikasi":
     st.markdown("""
     <div class="lilac-card">
-        <h2>🔎 Evidence-Based Graph Query</h2>
-        <p>Menu ini digunakan untuk menelusuri bukti relasi antara tanaman, senyawa bioaktif,
-        khasiat, bagian tanaman, dosis, cara pengolahan, dan sumber literatur.</p>
-    </div>
-    """, unsafe_allow_html=True)
-
-
-elif menu == "🧬 Similarity Analysis":
-    st.markdown("""
-    <div class="lilac-card">
-        <h2>🧬 Similarity Analysis</h2>
-        <p>Menu ini digunakan untuk menganalisis kemiripan tanaman herbal berdasarkan
-        senyawa bioaktif, khasiat, bagian tanaman, dan pola relasi.</p>
-    </div>
-    """, unsafe_allow_html=True)
-
-
-elif menu == "💊 Herbal Recommendation":
-    st.markdown("""
-    <div class="lilac-card">
-        <h2>💊 Herbal Recommendation</h2>
-        <p>Menu ini digunakan untuk rekomendasi tanaman herbal berdasarkan khasiat,
-        senyawa bioaktif, atau kategori penyakit.</p>
+        <h2>ℹ️ Tentang HyTBIONEX</h2>
+        <p>
+        HyTBIONEX adalah prototipe sistem untuk ekstraksi informasi bioaktif tanaman herbal Indonesia,
+        ekstraksi relasi, dan pembangunan Enhanced Herb Knowledge Graph 2.0.
+        </p>
     </div>
     """, unsafe_allow_html=True)
