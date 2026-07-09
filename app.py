@@ -13,7 +13,7 @@ import plotly.express as px
 # =========================================================
 # KONFIGURASI
 # =========================================================
-APP_TITLE = "HyTBioNEX V18"
+APP_TITLE = "HyTBIONEX"
 DATASET_FILE = "Data set 20098+ Gambar.xlsx"
 ASSET_DIR = "assets"
 
@@ -28,6 +28,9 @@ st.set_page_config(
 # =========================================================
 # SESSION STATE
 # =========================================================
+if "page" not in st.session_state:
+    st.session_state.page = "🏠 Dashboard"
+
 if "last_result" not in st.session_state:
     st.session_state.last_result = None
 
@@ -42,7 +45,7 @@ if "input_text" not in st.session_state:
 
 
 # =========================================================
-# FUNGSI UMUM
+# FUNGSI DASAR
 # =========================================================
 def safe_text(x):
     if x is None:
@@ -62,6 +65,15 @@ def slugify_filename(text):
     text = text.replace(" ", "_")
     text = re.sub(r"_+", "_", text)
     return text.strip("_")
+
+
+def normalize_colname(col):
+    col = str(col).strip().lower()
+    col = col.replace("_", " ")
+    col = col.replace("/", " ")
+    col = re.sub(r"[^a-zA-Z0-9À-ÿ\s]", " ", col)
+    col = re.sub(r"\s+", " ", col)
+    return col.strip()
 
 
 def image_to_base64(path):
@@ -84,6 +96,8 @@ def find_optional_background():
         "assets/herbal_banner.jpg",
         "assets/dashboard_background.png",
         "assets/dashboard_background.jpg",
+        "background.png",
+        "background.jpg",
     ]
 
     for path in candidates:
@@ -91,15 +105,6 @@ def find_optional_background():
             return image_to_base64(path)
 
     return ""
-
-
-def normalize_colname(col):
-    col = str(col).strip().lower()
-    col = col.replace("_", " ")
-    col = col.replace("/", " ")
-    col = re.sub(r"[^a-zA-Z0-9À-ÿ\s]", " ", col)
-    col = re.sub(r"\s+", " ", col)
-    return col.strip()
 
 
 def find_col(df, candidates):
@@ -222,7 +227,7 @@ def score_row(row, search_text, col_nama, col_latin, col_lokal):
 
     if nama and nama != "belum terdeteksi":
         if nama in search_text:
-            score += 160
+            score += 170
         for token in nama.split():
             if len(token) >= 3 and token in search_text:
                 score += 25
@@ -330,6 +335,7 @@ def find_plant_image(result):
         ])
 
     slug = slugify_filename(nama)
+
     if slug:
         for ext in ["jpg", "jpeg", "png", "webp"]:
             candidates.extend([
@@ -366,7 +372,7 @@ def run_extraction(text_input, uploaded_file, df, dataset_status):
 
 
 # =========================================================
-# GRAFIK DAN VISUALISASI
+# GRAFIK DAN KG
 # =========================================================
 def make_descriptive_chart(df):
     if df.empty:
@@ -408,7 +414,7 @@ def make_descriptive_chart(df):
         title_font=dict(size=20, color="#064e3b"),
         xaxis_title="Jumlah Data",
         yaxis_title="Nama Tanaman",
-        margin=dict(l=20, r=20, t=60, b=20)
+        margin=dict(l=20, r=20, t=60, b=20),
     )
 
     fig.update_traces(textposition="outside")
@@ -555,9 +561,10 @@ st.markdown(f"""
 /* SIDEBAR */
 [data-testid="stSidebar"] {{
     background:
-        radial-gradient(circle at bottom left, rgba(255,237,213,0.13), transparent 30%),
-        linear-gradient(180deg, #022c22 0%, #064e3b 52%, #065f46 100%) !important;
-    border-right: 1px solid rgba(255,255,255,0.14);
+        radial-gradient(circle at bottom left, rgba(34,197,94,0.25), transparent 28%),
+        radial-gradient(circle at top right, rgba(16,185,129,0.18), transparent 35%),
+        linear-gradient(180deg, #021f16 0%, #043b2c 45%, #065f46 100%) !important;
+    border-right: 1px solid rgba(255,255,255,0.12);
 }}
 
 [data-testid="stSidebar"] * {{
@@ -572,21 +579,79 @@ st.markdown(f"""
 
 [data-testid="stSidebar"] h2,
 [data-testid="stSidebar"] h3 {{
-    color: #bbf7d0 !important;
+    color: #86efac !important;
     font-weight: 900 !important;
 }}
 
-[data-testid="stSidebar"] [role="radiogroup"] label {{
-    background: rgba(255,255,255,0.08) !important;
-    padding: 13px 15px !important;
-    border-radius: 15px !important;
-    margin-bottom: 9px !important;
-    border: 1px solid rgba(255,255,255,0.10) !important;
+[data-testid="stSidebar"] .stButton > button {{
+    background: transparent !important;
+    color: #f8fff8 !important;
+    border: none !important;
+    box-shadow: none !important;
+    text-align: left !important;
+    justify-content: flex-start !important;
+    padding: 12px 14px !important;
+    border-radius: 14px !important;
+    font-size: 16px !important;
+    font-weight: 650 !important;
+    margin-bottom: 5px !important;
+    width: 100% !important;
 }}
 
-[data-testid="stSidebar"] [role="radiogroup"] label:hover {{
-    background: rgba(34,197,94,0.28) !important;
-    transform: translateX(4px);
+[data-testid="stSidebar"] .stButton > button:hover {{
+    background: rgba(255,255,255,0.12) !important;
+    color: #ffffff !important;
+    transform: translateX(3px);
+}}
+
+.nav-active {{
+    background:
+        linear-gradient(90deg, rgba(34,197,94,0.38), rgba(16,185,129,0.20)) !important;
+    border: 1px solid rgba(134,239,172,0.28);
+    box-shadow: 0 0 22px rgba(34,197,94,0.22);
+    border-radius: 15px;
+    padding: 13px 15px;
+    margin-bottom: 8px;
+    color: #ffffff !important;
+    font-size: 16px;
+    font-weight: 800;
+}}
+
+.sidebar-section-title {{
+    color: #86efac !important;
+    font-size: 13px !important;
+    font-weight: 900 !important;
+    letter-spacing: 0.6px;
+    margin-top: 22px;
+    margin-bottom: 10px;
+    text-transform: uppercase;
+}}
+
+.sidebar-line {{
+    height: 1px;
+    background: rgba(255,255,255,0.14);
+    margin: 18px 0;
+}}
+
+.sidebar-footer {{
+    margin-top: 28px;
+    padding: 18px;
+    border-radius: 18px;
+    background: rgba(255,255,255,0.08);
+    border: 1px solid rgba(255,255,255,0.14);
+}}
+
+.sidebar-footer h3 {{
+    color: #ffffff !important;
+    margin: 0 0 6px 0 !important;
+    font-size: 17px !important;
+    font-weight: 900 !important;
+}}
+
+.sidebar-footer p {{
+    color: #d1fae5 !important;
+    margin: 0 !important;
+    font-size: 12px !important;
 }}
 
 /* HEADER ATAS */
@@ -650,7 +715,7 @@ st.markdown(f"""
     min-width: 145px;
 }}
 
-/* DASHBOARD CARD */
+/* DASHBOARD */
 .dashboard-shell {{
     background: rgba(255,255,255,0.92);
     border-radius: 30px;
@@ -683,23 +748,23 @@ st.markdown(f"""
     max-width: 680px;
 }}
 
-/* PANEL INPUT */
-.panel-card {{
-    background: rgba(255,255,255,0.96);
-    padding: 23px;
-    border-radius: 20px;
+.single-input-card {{
+    background: rgba(255,255,255,0.97);
+    padding: 25px;
+    border-radius: 22px;
     box-shadow: 0 12px 28px rgba(15,23,42,0.10);
     border: 1px solid rgba(6,78,59,0.10);
-    min-height: 300px;
+    margin-top: 18px;
+    margin-bottom: 18px;
 }}
 
-.panel-card h3 {{
+.single-input-card h3 {{
     color: #064e3b;
     margin: 0 0 10px 0;
     font-weight: 900;
 }}
 
-.panel-card p {{
+.single-input-card p {{
     color: #334155;
 }}
 
@@ -748,7 +813,6 @@ textarea::placeholder {{
     color: white !important;
 }}
 
-/* SUMMARY */
 .summary-card {{
     background: rgba(255,255,255,0.96);
     padding: 22px;
@@ -786,7 +850,6 @@ textarea::placeholder {{
     font-weight:900;
 }}
 
-/* QUICK CARD */
 .quick-card {{
     background: rgba(255,255,255,0.96);
     padding: 18px;
@@ -818,7 +881,6 @@ textarea::placeholder {{
     background:#f8fff8;
 }}
 
-/* OUTPUT */
 .lilac-card {{
     background: #f3e8ff;
     padding: 22px;
@@ -864,6 +926,7 @@ textarea::placeholder {{
     padding: 18px;
     box-shadow: 0 10px 25px rgba(15,23,42,0.09);
     border: 1px solid rgba(6,78,59,0.10);
+    margin-bottom: 18px;
 }}
 
 .footer-status {{
@@ -875,41 +938,90 @@ textarea::placeholder {{
     font-weight:800;
     text-align:center;
 }}
+
+.downstream-card {{
+    background: #ffffff;
+    border-radius: 20px;
+    padding: 18px;
+    box-shadow: 0 10px 24px rgba(15,23,42,0.08);
+    border: 1px solid rgba(6,78,59,0.12);
+    min-height: 360px;
+}}
+
+.downstream-card h4 {{
+    color: #064e3b;
+    font-weight: 900;
+    text-align: center;
+}}
+
+.downstream-card p {{
+    color: #334155;
+    font-size: 14px;
+    line-height: 1.5;
+}}
+
+.flow-box {{
+    background: #f0fdf4;
+    border: 1px solid #bbf7d0;
+    color: #064e3b;
+    border-radius: 12px;
+    padding: 8px;
+    text-align: center;
+    margin-bottom: 8px;
+    font-weight: 800;
+}}
 </style>
 """, unsafe_allow_html=True)
 
 
 # =========================================================
-# SIDEBAR AKTIF
+# SIDEBAR CUSTOM
 # =========================================================
-st.sidebar.markdown("# 🌿 HyTBioNEX")
+def set_page(page_name):
+    st.session_state.page = page_name
+
+
+def sidebar_button(label, page_name, key):
+    if st.session_state.page == page_name:
+        st.sidebar.markdown(f'<div class="nav-active">{label}</div>', unsafe_allow_html=True)
+    else:
+        if st.sidebar.button(label, key=key, use_container_width=True):
+            set_page(page_name)
+            st.rerun()
+
+
+st.sidebar.markdown("# 🌿 HyTBIONEX")
 st.sidebar.markdown("Hybrid Transformer Pipeline")
-st.sidebar.markdown("---")
-st.sidebar.markdown("### ANALISIS DATA")
+st.sidebar.markdown('<div class="sidebar-line"></div>', unsafe_allow_html=True)
 
-menu = st.sidebar.radio(
-    "Menu",
-    [
-        "🏠 Dashboard",
-        "🌿 Input Tanaman",
-        "📁 Upload Dokumen",
-        "📋 Hasil Isolasi Entitas",
-        "🔗 Relation Extraction",
-        "🕸️ HerbKG 2.0 Explorer",
-        "📊 Statistik & Analitik",
-        "⚙️ Pengaturan",
-        "ℹ️ Tentang Aplikasi",
-    ],
-    label_visibility="collapsed"
-)
+sidebar_button("🏠 Dashboard", "🏠 Dashboard", "nav_dashboard")
 
-st.sidebar.markdown("---")
+st.sidebar.markdown('<div class="sidebar-section-title">ANALISIS DATA</div>', unsafe_allow_html=True)
+sidebar_button("🌿 Input Tanaman\n(Kata / Kalimat)", "🌿 Input Tanaman", "nav_input")
+sidebar_button("📄 Upload Dokumen\n(PDF / Excel)", "📁 Upload Dokumen", "nav_upload")
+sidebar_button("📋 Hasil Isolasi Entitas", "📋 Hasil Isolasi Entitas", "nav_hasil")
+sidebar_button("🔗 Relation Extraction", "🔗 Relation Extraction", "nav_relasi")
+sidebar_button("🕸️ HerbKG 2.0 Explorer", "🕸️ HerbKG 2.0 Explorer", "nav_kg")
+
+st.sidebar.markdown('<div class="sidebar-line"></div>', unsafe_allow_html=True)
+st.sidebar.markdown('<div class="sidebar-section-title">VISUALISASI</div>', unsafe_allow_html=True)
+sidebar_button("📦 Aplikasi Downstream", "📦 Aplikasi Downstream", "nav_downstream")
+sidebar_button("📊 Statistik & Analitik", "📊 Statistik & Analitik", "nav_statistik")
+
+st.sidebar.markdown('<div class="sidebar-line"></div>', unsafe_allow_html=True)
+st.sidebar.markdown('<div class="sidebar-section-title">MODEL & SISTEM</div>', unsafe_allow_html=True)
+sidebar_button("🧩 Training Model", "⚙️ Pengaturan", "nav_training")
+sidebar_button("⚙️ Pengaturan", "⚙️ Pengaturan", "nav_setting")
+sidebar_button("ℹ️ Tentang Aplikasi", "ℹ️ Tentang Aplikasi", "nav_about")
+
 st.sidebar.markdown("""
-<div class="footer-status">
-🌿 HyTBioNEX V18<br>
-<small>© 2025 | Sistem Aktif</small>
+<div class="sidebar-footer">
+    <h3>🌿 HyTBIONEX</h3>
+    <p>© 2025 All rights reserved</p>
 </div>
 """, unsafe_allow_html=True)
+
+menu = st.session_state.page
 
 
 # =========================================================
@@ -918,7 +1030,7 @@ st.sidebar.markdown("""
 st.markdown("""
 <div class="top-header">
     <div>
-        <h1>🌿 HyTBioNEX V18</h1>
+        <h1>🌿 HyTBIONEX</h1>
         <p>Hybrid Transformer Pipeline</p>
     </div>
     <div>
@@ -949,60 +1061,8 @@ total_relasi = total_data * 8 if total_data else 0
 
 
 # =========================================================
-# KOMPONEN TAMPILAN
+# RENDER KOMPONEN
 # =========================================================
-def show_input_upload_area():
-    col1, col2 = st.columns(2)
-
-    with col1:
-        st.markdown("""
-        <div class="panel-card">
-            <h3>📝 1. INPUT KATA / KALIMAT</h3>
-            <p>Masukkan nama lokal tanaman atau kalimat deskriptif</p>
-        """, unsafe_allow_html=True)
-
-        text_input = st.text_area(
-            "Input Data Tanaman",
-            placeholder="Contoh: Jahe, Kunyit, Sambiloto, Kayu Manis...",
-            height=110,
-            key="main_input_text"
-        )
-
-        submit_text = st.button("🔍 Proses Analisis", use_container_width=True, key="btn_text_process")
-        st.markdown("</div>", unsafe_allow_html=True)
-
-    with col2:
-        st.markdown("""
-        <div class="panel-card">
-            <h3>📁 2. UPLOAD DOKUMEN</h3>
-            <p>Unggah dokumen untuk diekstraksi informasinya</p>
-        """, unsafe_allow_html=True)
-
-        uploaded_file = st.file_uploader(
-            "Upload Dokumen",
-            type=["pdf", "txt", "csv", "xlsx", "xls"],
-            key="main_uploaded_file"
-        )
-
-        submit_file = st.button("📄 Proses Dokumen", use_container_width=True, key="btn_file_process")
-        st.markdown("</div>", unsafe_allow_html=True)
-
-    if submit_text or submit_file:
-        if not text_input and uploaded_file is None:
-            st.warning("Masukkan nama tanaman atau upload dokumen terlebih dahulu.")
-        else:
-            with st.spinner("Sedang memproses ekstraksi informasi bioaktif..."):
-                result, image_path, doc_status, match_status = run_extraction(
-                    text_input,
-                    uploaded_file,
-                    df_data,
-                    dataset_status
-                )
-
-            st.success("Proses analisis selesai.")
-            render_all_outputs(result, image_path, dataset_status, doc_status, match_status)
-
-
 def render_summary_card():
     st.markdown(f"""
     <div class="summary-card">
@@ -1039,20 +1099,55 @@ def render_summary_card():
                 <div class="summary-value" style="color:#7c3aed;">{total_relasi:,}</div>
             </div>
         </div>
-
-        <div style="color:#475569;font-size:13px;margin-top:10px;">
-            🕒 Terakhir diperbarui:<br>
-            Sistem Streamlit aktif
-        </div>
     </div>
     """, unsafe_allow_html=True)
 
 
-def render_quick_access():
+def render_single_input_area():
     st.markdown("""
-    <div class="graph-box">
-        <h3 style="color:#064e3b;">AKSES CEPAT ANALISIS</h3>
+    <div class="single-input-card">
+        <h3>📝 Input Tanaman dan Dokumen</h3>
+        <p>Masukkan nama tanaman atau kalimat, lalu unggah dokumen jika ada. Sistem akan mencocokkan informasi dengan dataset herbal.</p>
+    </div>
     """, unsafe_allow_html=True)
+
+    col1, col2 = st.columns([1.1, 1])
+
+    with col1:
+        text_input = st.text_area(
+            "Input Data Tanaman",
+            placeholder="Contoh: Jahe, Kunyit, Sambiloto, Kayu Manis...",
+            height=130,
+            key="main_input_text"
+        )
+
+    with col2:
+        uploaded_file = st.file_uploader(
+            "Upload Dokumen",
+            type=["pdf", "txt", "csv", "xlsx", "xls"],
+            key="main_uploaded_file"
+        )
+
+    submit = st.button("🔍 Proses Analisis", use_container_width=True, key="btn_process_all")
+
+    if submit:
+        if not text_input and uploaded_file is None:
+            st.warning("Masukkan nama tanaman atau upload dokumen terlebih dahulu.")
+        else:
+            with st.spinner("Sedang memproses ekstraksi informasi bioaktif..."):
+                result, image_path, doc_status, match_status = run_extraction(
+                    text_input,
+                    uploaded_file,
+                    df_data,
+                    dataset_status
+                )
+
+            st.success("Proses analisis selesai.")
+            render_all_outputs(result, image_path, dataset_status, doc_status, match_status)
+
+
+def render_quick_access():
+    st.markdown('<div class="graph-box"><h3 style="color:#064e3b;">AKSES CEPAT ANALISIS</h3>', unsafe_allow_html=True)
 
     q1, q2, q3, q4 = st.columns(4)
 
@@ -1222,8 +1317,73 @@ def render_preview_kg():
     st.markdown('</div>', unsafe_allow_html=True)
 
 
+def render_downstream_page():
+    st.markdown('<div class="section-title">📦 Aplikasi Downstream</div>', unsafe_allow_html=True)
+
+    st.markdown("""
+    <div class="graph-box">
+        <p style="color:#334155;font-size:16px;">
+        Aplikasi downstream memanfaatkan hasil ekstraksi entitas dan relasi dari HerbKG 2.0
+        untuk analisis deskriptif, query graf berbasis bukti, analisis kemiripan, dan rekomendasi herbal.
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    d1, d2, d3, d4 = st.columns(4)
+
+    with d1:
+        st.markdown("""
+        <div class="downstream-card">
+            <h4>1. Analisis Deskriptif</h4>
+            <p>Menampilkan ringkasan statistik entitas, relasi, dan distribusi data herbal.</p>
+            <div class="flow-box">Tanaman</div>
+            <div class="flow-box">Senyawa Bioaktif</div>
+            <div class="flow-box">Khasiat</div>
+            <div class="flow-box">Sumber Data</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with d2:
+        st.markdown("""
+        <div class="downstream-card">
+            <h4>2. Query Graf Berbasis Bukti</h4>
+            <p>Menelusuri hubungan tanaman, senyawa, khasiat, dan sumber literatur.</p>
+            <div class="flow-box">Tanaman → Senyawa</div>
+            <div class="flow-box">Senyawa → Khasiat</div>
+            <div class="flow-box">Khasiat → Bukti Literatur</div>
+            <div class="flow-box">Output: Jalur Relasi</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with d3:
+        st.markdown("""
+        <div class="downstream-card">
+            <h4>3. Analisis Kemiripan</h4>
+            <p>Menemukan tanaman yang mirip berdasarkan senyawa dan khasiat.</p>
+            <div class="flow-box">Kelor → 0,56</div>
+            <div class="flow-box">Sirih → 0,41</div>
+            <div class="flow-box">Jahe → 0,39</div>
+            <div class="flow-box">Kayu Manis → 0,28</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with d4:
+        st.markdown("""
+        <div class="downstream-card">
+            <h4>4. Rekomendasi Herbal</h4>
+            <p>Memberikan rekomendasi tanaman herbal berbasis khasiat dan relasi graf.</p>
+            <div class="flow-box">Keluhan / Penyakit</div>
+            <div class="flow-box">Graph Search</div>
+            <div class="flow-box">Tanaman Terkait</div>
+            <div class="flow-box">Peringkat Rekomendasi</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    render_descriptive_chart()
+
+
 # =========================================================
-# HALAMAN DASHBOARD
+# HALAMAN
 # =========================================================
 if menu == "🏠 Dashboard":
     st.markdown('<div class="dashboard-shell">', unsafe_allow_html=True)
@@ -1233,7 +1393,7 @@ if menu == "🏠 Dashboard":
     with top_left:
         st.markdown("""
         <div class="hero-banner">
-            <h2>Selamat datang di HyTBioNEX V18</h2>
+            <h2>Selamat datang di HyTBIONEX</h2>
             <p>
             Platform cerdas untuk isolasi informasi bioaktif dari tanaman herbal Indonesia
             menggunakan pendekatan Hybrid Transformer serta integrasi HerbKG 2.0.
@@ -1244,7 +1404,7 @@ if menu == "🏠 Dashboard":
     with top_right:
         render_summary_card()
 
-    show_input_upload_area()
+    render_single_input_area()
 
     down_left, down_right = st.columns([2, 1])
 
@@ -1262,16 +1422,10 @@ if menu == "🏠 Dashboard":
     st.markdown('</div>', unsafe_allow_html=True)
 
 
-# =========================================================
-# HALAMAN INPUT / UPLOAD
-# =========================================================
 elif menu in ["🌿 Input Tanaman", "📁 Upload Dokumen"]:
-    show_input_upload_area()
+    render_single_input_area()
 
 
-# =========================================================
-# HALAMAN HASIL
-# =========================================================
 elif menu == "📋 Hasil Isolasi Entitas":
     if st.session_state.last_result:
         render_result_cards(st.session_state.last_result)
@@ -1294,9 +1448,12 @@ elif menu == "🕸️ HerbKG 2.0 Explorer":
         render_preview_kg()
 
 
+elif menu == "📦 Aplikasi Downstream":
+    render_downstream_page()
+
+
 elif menu == "📊 Statistik & Analitik":
     render_descriptive_chart()
-
     st.markdown('<div class="section-title">📋 Cuplikan Dataset</div>', unsafe_allow_html=True)
     st.dataframe(df_data.head(30), use_container_width=True)
 
@@ -1313,11 +1470,11 @@ elif menu == "⚙️ Pengaturan":
 elif menu == "ℹ️ Tentang Aplikasi":
     st.markdown("""
     <div class="lilac-card">
-        <h2>ℹ️ Tentang HyTBioNEX V18</h2>
+        <h2>ℹ️ Tentang HyTBIONEX</h2>
         <p>
-        HyTBioNEX V18 adalah prototipe sistem ekstraksi informasi bioaktif tanaman herbal Indonesia
-        berbasis pipeline Hybrid Transformer, ekstraksi entitas, ekstraksi relasi, visualisasi HerbKG 2.0,
-        serta analisis deskriptif.
+        HyTBIONEX adalah prototipe sistem ekstraksi informasi bioaktif tanaman herbal Indonesia
+        berbasis pipeline Hybrid Transformer, ekstraksi entitas, ekstraksi relasi,
+        visualisasi HerbKG 2.0, serta analisis deskriptif.
         </p>
         <p><b>Researcher:</b> Nazwita</p>
     </div>
