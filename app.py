@@ -5,12 +5,12 @@ from pathlib import Path
 
 import pandas as pd
 import streamlit as st
-import plotly.graph_objects as go
 import plotly.express as px
+import plotly.graph_objects as go
 
 
 # =========================================================
-# KONFIGURASI
+# KONFIGURASI APLIKASI
 # =========================================================
 APP_TITLE = "HyTBIONEX"
 DATASET_FILE = "Data set 20098+ Gambar.xlsx"
@@ -81,7 +81,7 @@ def normalize_colname(col):
 
 
 def find_col(df, candidates):
-    if df.empty:
+    if df is None or df.empty:
         return None
 
     normalized_cols = {normalize_colname(c): c for c in df.columns}
@@ -115,14 +115,27 @@ def value_from_row(row, col):
     return str(value).strip()
 
 
-def file_exists(path):
-    if path and os.path.exists(path):
-        return path
-    return None
+def safe_dataframe(df, cols=None, n=50):
+    if df is None or df.empty:
+        st.info("Data belum tersedia.")
+        return
+
+    try:
+        if cols:
+            cols = [c for c in cols if c is not None and c in df.columns]
+            if cols:
+                st.dataframe(df[cols].drop_duplicates().head(n))
+            else:
+                st.dataframe(df.head(n))
+        else:
+            st.dataframe(df.head(n))
+    except Exception as e:
+        st.warning("Tabel belum dapat ditampilkan.")
+        st.code(str(e))
 
 
 # =========================================================
-# LOAD DATASET UTAMA
+# LOAD DATASET
 # =========================================================
 @st.cache_data(show_spinner=False)
 def load_dataset():
@@ -133,8 +146,10 @@ def load_dataset():
     else:
         excel_files = [
             f for f in os.listdir(".")
-            if f.lower().endswith((".xlsx", ".xls")) and f != IMAGE_TABLE_FILE
+            if f.lower().endswith((".xlsx", ".xls"))
+            and f != IMAGE_TABLE_FILE
         ]
+
         if excel_files:
             dataset_path = excel_files[0]
 
@@ -163,17 +178,13 @@ def load_dataset():
         return pd.DataFrame(), f"Gagal membaca dataset: {e}"
 
 
-# =========================================================
-# LOAD TABEL GAMBAR RINGAN
-# =========================================================
 @st.cache_data(show_spinner=False)
 def load_image_mapping():
     """
-    Membaca file Gambar tanaman herbal.xlsx secara ringan.
-    Tidak membaca gambar tertanam agar aplikasi tidak lama loading.
-    Kolom Gambar sebaiknya berisi teks:
+    Membaca file Gambar tanaman herbal.xlsx jika ada.
+    Kolom Gambar harus berisi teks path, contoh:
     assets/serai.jpg
-    assets/jahe.jpg
+    assets/kayu_manis.jpg
     """
     mapping = {}
 
@@ -218,6 +229,24 @@ def load_image_mapping():
         pass
 
     return mapping
+
+
+# =========================================================
+# KOLOM DATASET
+# =========================================================
+def get_columns(df):
+    return {
+        "nama": find_col(df, ["Nama Tanaman", "Nama_Tanaman", "Tanaman", "Nama"]),
+        "latin": find_col(df, ["Nama Latin", "Nama_Latin", "Latin"]),
+        "lokal": find_col(df, ["Nama Lokal/Daerah", "Nama Lokal", "Nama Daerah", "Bahasa Daerah", "Bahasa_Daerah"]),
+        "bagian": find_col(df, ["Bagian Tanaman", "Bagian Digunakan", "Bagian_Digunakan", "Bagian"]),
+        "senyawa": find_col(df, ["Zat Bioaktif", "Senyawa Bioaktif", "Senyawa_Bioaktif", "Compound", "Senyawa", "Kandungan", "Kandungan Kimia"]),
+        "khasiat": find_col(df, ["Khasiat/Efek Terapeutik", "Khasiat", "Manfaat", "Benefit", "Biological Activity", "Biological_Activity"]),
+        "pengolahan": find_col(df, ["Cara Pengolahan", "Cara_Pengolahan", "Pengolahan", "Cara Pemakaian"]),
+        "dosis": find_col(df, ["Komposisi/Dosis", "Komposisi /Dosis", "Dosis", "Komposisi"]),
+        "sumber": find_col(df, ["Sumber Data", "Sumber_Data", "Sumber", "Referensi"]),
+        "gambar": find_col(df, ["Gambar", "Image", "Foto", "File Gambar", "Path Gambar", "Nama File Gambar"]),
+    }
 
 
 # =========================================================
@@ -271,39 +300,39 @@ def read_uploaded_file(uploaded_file):
 # =========================================================
 # MATCHING DATASET
 # =========================================================
-def score_row(row, search_text, col_nama, col_latin, col_lokal):
+def score_row(row, search_text, cols):
     score = 0
 
-    nama = clean_text(value_from_row(row, col_nama))
-    latin = clean_text(value_from_row(row, col_latin))
-    lokal = clean_text(value_from_row(row, col_lokal))
+    nama = clean_text(value_from_row(row, cols["nama"]))
+    latin = clean_text(value_from_row(row, cols["latin"]))
+    lokal = clean_text(value_from_row(row, cols["lokal"]))
 
     if nama and nama != "belum terdeteksi":
         if nama in search_text:
-            score += 170
+            score += 200
         for token in nama.split():
             if len(token) >= 3 and token in search_text:
-                score += 25
+                score += 30
 
     if latin and latin != "belum terdeteksi":
         if latin in search_text:
-            score += 150
+            score += 170
         for token in latin.split():
             if len(token) >= 4 and token in search_text:
-                score += 20
+                score += 25
 
     if lokal and lokal != "belum terdeteksi":
         parts = re.split(r"[,;/|]", lokal)
         for p in parts:
             p = clean_text(p)
             if p and len(p) >= 3 and p in search_text:
-                score += 80
+                score += 90
 
     return score
 
 
 def find_best_match(df, search_text):
-    if df.empty:
+    if df is None or df.empty:
         return None, "Dataset belum terbaca."
 
     search_text = clean_text(search_text)
@@ -311,39 +340,31 @@ def find_best_match(df, search_text):
     if not search_text:
         return None, "Input tanaman dan dokumen masih kosong."
 
-    col_nama = find_col(df, ["Nama Tanaman", "Nama_Tanaman", "Tanaman", "Nama"])
-    col_latin = find_col(df, ["Nama Latin", "Nama_Latin", "Latin"])
-    col_lokal = find_col(df, ["Nama Lokal/Daerah", "Nama Lokal", "Nama Daerah", "Bahasa Daerah", "Bahasa_Daerah"])
+    cols = get_columns(df)
 
     best_row = None
     best_score = 0
 
-    for _, row in df.iterrows():
-        score = score_row(row, search_text, col_nama, col_latin, col_lokal)
+    try:
+        for _, row in df.iterrows():
+            score = score_row(row, search_text, cols)
 
-        if score > best_score:
-            best_score = score
-            best_row = row
+            if score > best_score:
+                best_score = score
+                best_row = row
+    except Exception as e:
+        return None, f"Gagal mencocokkan data: {e}"
 
     if best_row is not None and best_score > 0:
-        nama = value_from_row(best_row, col_nama)
-        latin = value_from_row(best_row, col_latin)
+        nama = value_from_row(best_row, cols["nama"])
+        latin = value_from_row(best_row, cols["latin"])
         return best_row, f"Entitas cocok dengan dataset: {nama} / {latin} | Skor: {best_score}"
 
     return None, "Tidak ditemukan kecocokan entitas tanaman pada dataset."
 
 
 def extract_result(row, input_text, df):
-    col_nama = find_col(df, ["Nama Tanaman", "Nama_Tanaman", "Tanaman", "Nama"])
-    col_latin = find_col(df, ["Nama Latin", "Nama_Latin", "Latin"])
-    col_lokal = find_col(df, ["Nama Lokal/Daerah", "Nama Lokal", "Nama Daerah", "Bahasa Daerah", "Bahasa_Daerah"])
-    col_bagian = find_col(df, ["Bagian Tanaman", "Bagian Digunakan", "Bagian_Digunakan", "Bagian"])
-    col_senyawa = find_col(df, ["Zat Bioaktif", "Senyawa Bioaktif", "Senyawa_Bioaktif", "Compound", "Senyawa", "Kandungan", "Kandungan Kimia"])
-    col_khasiat = find_col(df, ["Khasiat/Efek Terapeutik", "Khasiat", "Manfaat", "Benefit", "Biological Activity", "Biological_Activity"])
-    col_pengolahan = find_col(df, ["Cara Pengolahan", "Cara_Pengolahan", "Pengolahan", "Cara Pemakaian"])
-    col_dosis = find_col(df, ["Komposisi/Dosis", "Komposisi /Dosis", "Dosis", "Komposisi"])
-    col_sumber = find_col(df, ["Sumber Data", "Sumber_Data", "Sumber", "Referensi"])
-    col_gambar = find_col(df, ["Gambar", "Image", "Foto", "File Gambar", "Path Gambar", "Nama File Gambar"])
+    cols = get_columns(df)
 
     if row is None:
         return {
@@ -360,28 +381,32 @@ def extract_result(row, input_text, df):
         }
 
     return {
-        "Nama Tanaman": value_from_row(row, col_nama),
-        "Nama Latin": value_from_row(row, col_latin),
-        "Nama Lokal/Daerah": value_from_row(row, col_lokal),
-        "Bagian Tanaman": value_from_row(row, col_bagian),
-        "Zat Bioaktif": value_from_row(row, col_senyawa),
-        "Khasiat/Efek Terapeutik": value_from_row(row, col_khasiat),
-        "Cara Pengolahan": value_from_row(row, col_pengolahan),
-        "Komposisi/Dosis": value_from_row(row, col_dosis),
-        "Sumber Data": value_from_row(row, col_sumber),
-        "Gambar": value_from_row(row, col_gambar),
+        "Nama Tanaman": value_from_row(row, cols["nama"]),
+        "Nama Latin": value_from_row(row, cols["latin"]),
+        "Nama Lokal/Daerah": value_from_row(row, cols["lokal"]),
+        "Bagian Tanaman": value_from_row(row, cols["bagian"]),
+        "Zat Bioaktif": value_from_row(row, cols["senyawa"]),
+        "Khasiat/Efek Terapeutik": value_from_row(row, cols["khasiat"]),
+        "Cara Pengolahan": value_from_row(row, cols["pengolahan"]),
+        "Komposisi/Dosis": value_from_row(row, cols["dosis"]),
+        "Sumber Data": value_from_row(row, cols["sumber"]),
+        "Gambar": value_from_row(row, cols["gambar"]),
     }
 
 
 # =========================================================
 # GAMBAR TANAMAN
 # =========================================================
+def path_if_exists(path):
+    try:
+        if path and os.path.exists(path):
+            return path
+    except Exception:
+        pass
+    return None
+
+
 def scan_assets_by_name(nama, latin):
-    """
-    Mencari gambar otomatis berdasarkan nama tanaman atau nama latin di folder assets.
-    Contoh:
-    nama: Kayu Manis -> assets/kayu_manis.jpg
-    """
     if not os.path.isdir(ASSET_DIR):
         return None
 
@@ -393,32 +418,39 @@ def scan_assets_by_name(nama, latin):
 
     image_exts = [".jpg", ".jpeg", ".png", ".webp"]
 
-    for file_name in os.listdir(ASSET_DIR):
-        file_path = os.path.join(ASSET_DIR, file_name)
-        if not os.path.isfile(file_path):
-            continue
+    try:
+        for file_name in os.listdir(ASSET_DIR):
+            file_path = os.path.join(ASSET_DIR, file_name)
 
-        stem = slugify_filename(Path(file_name).stem)
-        ext = Path(file_name).suffix.lower()
+            if not os.path.isfile(file_path):
+                continue
 
-        if ext not in image_exts:
-            continue
+            stem = slugify_filename(Path(file_name).stem)
+            ext = Path(file_name).suffix.lower()
 
-        for key in keys:
-            if key == stem or key in stem or stem in key:
-                return file_path
+            if ext not in image_exts:
+                continue
+
+            for key in keys:
+                if key == stem or key in stem or stem in key:
+                    return file_path
+    except Exception:
+        return None
 
     return None
 
 
 def find_plant_image(result, image_mapping):
-    gambar = result.get("Gambar", "")
-    nama = result.get("Nama Tanaman", "")
-    latin = result.get("Nama Latin", "")
+    try:
+        gambar = result.get("Gambar", "")
+        nama = result.get("Nama Tanaman", "")
+        latin = result.get("Nama Latin", "")
+    except Exception:
+        return None
 
     candidates = []
 
-    # 1. Dari kolom Gambar di dataset utama
+    # Dari kolom Gambar di dataset utama
     if gambar and gambar != "Belum terdeteksi":
         candidates.extend([
             gambar,
@@ -427,20 +459,23 @@ def find_plant_image(result, image_mapping):
             os.path.join("images", gambar),
         ])
 
-    # 2. Dari file Gambar tanaman herbal.xlsx kalau kolom Gambar berisi path teks
+    # Dari file Gambar tanaman herbal.xlsx
     for key in [clean_text(nama), clean_text(latin)]:
-        if key in image_mapping:
-            map_gambar = image_mapping[key].get("gambar", "")
+        try:
+            if key in image_mapping:
+                map_gambar = image_mapping[key].get("gambar", "")
 
-            if map_gambar:
-                candidates.extend([
-                    map_gambar,
-                    os.path.join(ASSET_DIR, map_gambar),
-                    os.path.join("gambar", map_gambar),
-                    os.path.join("images", map_gambar),
-                ])
+                if map_gambar:
+                    candidates.extend([
+                        map_gambar,
+                        os.path.join(ASSET_DIR, map_gambar),
+                        os.path.join("gambar", map_gambar),
+                        os.path.join("images", map_gambar),
+                    ])
+        except Exception:
+            pass
 
-    # 3. Dari nama file otomatis
+    # Otomatis dari nama tanaman dan latin
     for item in [nama, latin]:
         slug = slugify_filename(item)
 
@@ -454,24 +489,56 @@ def find_plant_image(result, image_mapping):
                 ])
 
     for path in candidates:
-        if file_exists(path):
-            return path
+        found = path_if_exists(path)
+        if found:
+            return found
 
-    # 4. Scan folder assets
-    found = scan_assets_by_name(nama, latin)
-    if found:
-        return found
-
-    return None
+    return scan_assets_by_name(nama, latin)
 
 
+# =========================================================
+# PROSES EKSTRAKSI AMAN
+# =========================================================
 def run_extraction(text_input, uploaded_file, df, dataset_status, image_mapping):
-    doc_text, doc_status = read_uploaded_file(uploaded_file)
+    doc_text = ""
+    doc_status = "Tidak ada dokumen yang diupload."
+    match_status = "Belum diproses."
+
+    try:
+        doc_text, doc_status = read_uploaded_file(uploaded_file)
+    except Exception as e:
+        doc_status = f"Dokumen gagal dibaca: {e}"
+
     combined_text = f"{text_input} {doc_text}"
 
-    row, match_status = find_best_match(df, combined_text)
-    result = extract_result(row, text_input, df)
-    image_path = find_plant_image(result, image_mapping)
+    try:
+        row, match_status = find_best_match(df, combined_text)
+    except Exception as e:
+        row = None
+        match_status = f"Proses pencocokan gagal: {e}"
+
+    try:
+        result = extract_result(row, text_input, df)
+    except Exception as e:
+        result = {
+            "Nama Tanaman": text_input if text_input else "Belum terdeteksi",
+            "Nama Latin": "Belum terdeteksi",
+            "Nama Lokal/Daerah": "Belum terdeteksi",
+            "Bagian Tanaman": "Belum terdeteksi",
+            "Zat Bioaktif": "Belum terdeteksi",
+            "Khasiat/Efek Terapeutik": "Belum terdeteksi",
+            "Cara Pengolahan": "Belum terdeteksi",
+            "Komposisi/Dosis": "Belum terdeteksi",
+            "Sumber Data": "Belum terdeteksi",
+            "Gambar": "Belum terdeteksi",
+        }
+        match_status = f"Ekstraksi gagal: {e}"
+
+    try:
+        image_path = find_plant_image(result, image_mapping)
+    except Exception as e:
+        image_path = None
+        match_status = f"{match_status} | Gambar gagal dicari: {e}"
 
     st.session_state.last_result = result
     st.session_state.last_image = image_path
@@ -485,56 +552,61 @@ def run_extraction(text_input, uploaded_file, df, dataset_status, image_mapping)
 
 
 # =========================================================
-# GRAFIK DESKRIPTIF DAN KG
+# GRAFIK DAN KG
 # =========================================================
 def make_descriptive_chart(df, column=None, title="Analisis Deskriptif"):
-    if df.empty:
+    if df is None or df.empty:
         return None
 
     if column is None:
-        column = find_col(df, ["Nama Tanaman", "Nama_Tanaman", "Tanaman", "Nama"])
+        cols = get_columns(df)
+        column = cols["nama"]
 
-    if column is None:
+    if column is None or column not in df.columns:
         return None
 
-    chart_df = (
-        df[column]
-        .astype(str)
-        .str.strip()
-        .replace("", pd.NA)
-        .dropna()
-        .value_counts()
-        .head(10)
-        .reset_index()
-    )
+    try:
+        chart_df = (
+            df[column]
+            .astype(str)
+            .str.strip()
+            .replace("", pd.NA)
+            .dropna()
+            .value_counts()
+            .head(10)
+            .reset_index()
+        )
 
-    chart_df.columns = ["Kategori", "Jumlah Data"]
+        chart_df.columns = ["Kategori", "Jumlah Data"]
 
-    fig = px.bar(
-        chart_df,
-        x="Jumlah Data",
-        y="Kategori",
-        orientation="h",
-        text="Jumlah Data",
-        color="Jumlah Data",
-        color_continuous_scale=["#bbf7d0", "#22c55e", "#047857"],
-        title=title
-    )
+        fig = px.bar(
+            chart_df,
+            x="Jumlah Data",
+            y="Kategori",
+            orientation="h",
+            text="Jumlah Data",
+            color="Jumlah Data",
+            color_continuous_scale=["#bbf7d0", "#22c55e", "#047857"],
+            title=title
+        )
 
-    fig.update_layout(
-        height=430,
-        plot_bgcolor="white",
-        paper_bgcolor="white",
-        title_font=dict(size=20, color="#064e3b"),
-        xaxis_title="Jumlah Data",
-        yaxis_title="Kategori",
-        margin=dict(l=20, r=20, t=60, b=20),
-    )
+        fig.update_layout(
+            height=430,
+            plot_bgcolor="white",
+            paper_bgcolor="white",
+            title_font=dict(size=20, color="#064e3b"),
+            xaxis_title="Jumlah Data",
+            yaxis_title="Kategori",
+            margin=dict(l=20, r=20, t=60, b=20),
+        )
 
-    fig.update_traces(textposition="outside")
-    fig.update_yaxes(autorange="reversed")
+        fig.update_traces(textposition="outside")
+        fig.update_yaxes(autorange="reversed")
 
-    return fig
+        return fig
+
+    except Exception:
+        return None
 
 
 def short_label(text, max_len=24):
@@ -550,14 +622,24 @@ def short_label(text, max_len=24):
 
 
 def make_kg_graph(result):
-    tanaman = short_label(result["Nama Tanaman"], 18)
-    latin = short_label(result["Nama Latin"], 24)
-    bagian = short_label(result["Bagian Tanaman"], 18)
-    senyawa = short_label(result["Zat Bioaktif"], 24)
-    khasiat = short_label(result["Khasiat/Efek Terapeutik"], 22)
-    pengolahan = short_label(result["Cara Pengolahan"], 22)
-    dosis = short_label(result["Komposisi/Dosis"], 22)
-    sumber = short_label(result["Sumber Data"], 26)
+    try:
+        tanaman = short_label(result["Nama Tanaman"], 18)
+        latin = short_label(result["Nama Latin"], 24)
+        bagian = short_label(result["Bagian Tanaman"], 18)
+        senyawa = short_label(result["Zat Bioaktif"], 24)
+        khasiat = short_label(result["Khasiat/Efek Terapeutik"], 22)
+        pengolahan = short_label(result["Cara Pengolahan"], 22)
+        dosis = short_label(result["Komposisi/Dosis"], 22)
+        sumber = short_label(result["Sumber Data"], 26)
+    except Exception:
+        tanaman = "Tanaman"
+        latin = "Nama Latin"
+        bagian = "Bagian"
+        senyawa = "Senyawa"
+        khasiat = "Khasiat"
+        pengolahan = "Pengolahan"
+        dosis = "Dosis"
+        sumber = "Sumber"
 
     nodes = [
         {"id": "tanaman", "label": tanaman, "x": 0, "y": 0, "color": "#047857", "size": 76},
@@ -649,7 +731,7 @@ def make_kg_graph(result):
 
 
 # =========================================================
-# CSS
+# CSS TAMPILAN
 # =========================================================
 html_block("""
 <style>
@@ -662,6 +744,7 @@ html_block("""
     max-width: 1500px;
 }
 
+/* SIDEBAR */
 [data-testid="stSidebar"] {
     background:
         radial-gradient(circle at bottom left, rgba(34,197,94,0.25), transparent 28%),
@@ -745,6 +828,7 @@ html_block("""
     font-size: 12px !important;
 }
 
+/* HEADER */
 .top-header {
     background:
         linear-gradient(135deg, rgba(1,50,32,0.98), rgba(6,78,59,0.98), rgba(5,95,70,0.98));
@@ -805,6 +889,7 @@ html_block("""
     min-width: 145px;
 }
 
+/* KONTEN */
 .hero-banner {
     background:
         radial-gradient(circle at 70% 40%, rgba(187,247,208,0.92), transparent 28%),
@@ -946,11 +1031,6 @@ textarea {
     box-shadow: none !important;
 }
 
-.down-btn button:hover {
-    background: #dcfce7 !important;
-    color: #064e3b !important;
-}
-
 .footer-status {
     background: rgba(255,255,255,0.94);
     border-radius: 16px;
@@ -965,17 +1045,24 @@ textarea {
 
 
 # =========================================================
-# LOAD DATA
+# LOAD DATA GLOBAL
 # =========================================================
 df_data, dataset_status = load_dataset()
 image_mapping = load_image_mapping()
-
-col_senyawa_global = find_col(df_data, ["Zat Bioaktif", "Senyawa Bioaktif", "Senyawa", "Compound", "Kandungan"])
-col_khasiat_global = find_col(df_data, ["Khasiat", "Manfaat", "Benefit", "Khasiat/Efek Terapeutik", "Biological Activity"])
+cols_global = get_columns(df_data)
 
 total_data = len(df_data)
-total_senyawa = df_data[col_senyawa_global].astype(str).replace("", pd.NA).dropna().nunique() if col_senyawa_global else 0
-total_khasiat = df_data[col_khasiat_global].astype(str).replace("", pd.NA).dropna().nunique() if col_khasiat_global else 0
+
+if cols_global["senyawa"]:
+    total_senyawa = df_data[cols_global["senyawa"]].astype(str).replace("", pd.NA).dropna().nunique()
+else:
+    total_senyawa = 0
+
+if cols_global["khasiat"]:
+    total_khasiat = df_data[cols_global["khasiat"]].astype(str).replace("", pd.NA).dropna().nunique()
+else:
+    total_khasiat = 0
+
 total_relasi = total_data * 8 if total_data else 0
 
 
@@ -993,7 +1080,7 @@ def sidebar_button(label, page_name, key):
             unsafe_allow_html=True
         )
     else:
-        if st.sidebar.button(label, key=key, width="stretch"):
+        if st.sidebar.button(label, key=key):
             set_page(page_name)
             st.rerun()
 
@@ -1055,7 +1142,7 @@ html_block("""
 
 
 # =========================================================
-# RENDER KOMPONEN UTAMA
+# RENDER KOMPONEN
 # =========================================================
 def render_summary_card():
     st.subheader("RINGKASAN DATA")
@@ -1082,7 +1169,7 @@ def render_input_area():
     html_block("""
     <div class="input-panel">
         <h3>📝 Input Tanaman dan Dokumen</h3>
-        <p>Masukkan nama tanaman atau kalimat, lalu unggah dokumen jika ada. Sistem akan mencocokkan informasi dengan dataset herbal.</p>
+        <p>Masukkan nama tanaman atau kalimat. Upload dokumen bersifat opsional. Sistem akan mencocokkan informasi dengan dataset herbal.</p>
     </div>
     """)
 
@@ -1103,38 +1190,39 @@ def render_input_area():
             key="main_uploaded_file"
         )
 
-    submit = st.button("🔍 Proses Analisis", width="stretch", key="btn_process_all")
+    submit = st.button("🔍 Proses Analisis", key="btn_process_all")
 
     if submit:
         if not text_input and uploaded_file is None:
             st.warning("Masukkan nama tanaman atau upload dokumen terlebih dahulu.")
-        else:
-            with st.spinner("Sedang memproses ekstraksi informasi bioaktif..."):
-                result, image_path, doc_status, match_status = run_extraction(
-                    text_input,
-                    uploaded_file,
-                    df_data,
-                    dataset_status,
-                    image_mapping
-                )
+            return
 
-            st.success("Proses analisis selesai.")
-            render_all_outputs(result, image_path, dataset_status, doc_status, match_status)
+        with st.spinner("Sedang memproses ekstraksi informasi bioaktif..."):
+            result, image_path, doc_status, match_status = run_extraction(
+                text_input,
+                uploaded_file,
+                df_data,
+                dataset_status,
+                image_mapping
+            )
+
+        st.success("Proses analisis selesai.")
+        render_all_outputs(result, image_path, dataset_status, doc_status, match_status)
 
 
 def render_result_cards(result):
     html_block('<div class="section-title">📋 Hasil Ekstraksi Informasi Bioaktif</div>')
 
     cards = [
-        ("🌿 Nama Tanaman", result["Nama Tanaman"]),
-        ("🔬 Nama Latin", result["Nama Latin"]),
-        ("🇮🇩 Nama Lokal/Daerah", result["Nama Lokal/Daerah"]),
-        ("🍃 Bagian Tanaman", result["Bagian Tanaman"]),
-        ("🧪 Zat Bioaktif", result["Zat Bioaktif"]),
-        ("💚 Khasiat / Efek Terapeutik", result["Khasiat/Efek Terapeutik"]),
-        ("☕ Cara Pengolahan", result["Cara Pengolahan"]),
-        ("⚖️ Komposisi / Dosis", result["Komposisi/Dosis"]),
-        ("📚 Sumber Data", result["Sumber Data"]),
+        ("🌿 Nama Tanaman", result.get("Nama Tanaman", "Belum terdeteksi")),
+        ("🔬 Nama Latin", result.get("Nama Latin", "Belum terdeteksi")),
+        ("🇮🇩 Nama Lokal/Daerah", result.get("Nama Lokal/Daerah", "Belum terdeteksi")),
+        ("🍃 Bagian Tanaman", result.get("Bagian Tanaman", "Belum terdeteksi")),
+        ("🧪 Zat Bioaktif", result.get("Zat Bioaktif", "Belum terdeteksi")),
+        ("💚 Khasiat / Efek Terapeutik", result.get("Khasiat/Efek Terapeutik", "Belum terdeteksi")),
+        ("☕ Cara Pengolahan", result.get("Cara Pengolahan", "Belum terdeteksi")),
+        ("⚖️ Komposisi / Dosis", result.get("Komposisi/Dosis", "Belum terdeteksi")),
+        ("📚 Sumber Data", result.get("Sumber Data", "Belum terdeteksi")),
     ]
 
     rows = [st.columns(3), st.columns(3), st.columns(3)]
@@ -1156,45 +1244,49 @@ def render_result_cards(result):
 def render_image_section(result, image_path):
     html_block('<div class="section-title">🖼️ Lampiran Gambar Tanaman</div>')
 
-    if image_path:
+    if image_path and os.path.exists(image_path):
         c1, c2 = st.columns([1, 2])
 
         with c1:
-            st.image(image_path, caption=result["Nama Tanaman"], width="stretch")
+            st.image(image_path, caption=result.get("Nama Tanaman", "Tanaman"))
 
         with c2:
             html_block(f"""
             <div class="lilac-card">
                 <h3>🌿 Gambar Tanaman Terkoneksi Dataset</h3>
-                <p><b>Nama Tanaman:</b> {safe_text(result["Nama Tanaman"])}</p>
-                <p><b>Nama Latin:</b> {safe_text(result["Nama Latin"])}</p>
-                <p><b>Catatan:</b> Gambar tampil berdasarkan kolom <b>Gambar</b> di Excel atau nama file yang sesuai di folder <b>assets</b>.</p>
+                <p><b>Nama Tanaman:</b> {safe_text(result.get("Nama Tanaman", "Belum terdeteksi"))}</p>
+                <p><b>Nama Latin:</b> {safe_text(result.get("Nama Latin", "Belum terdeteksi"))}</p>
+                <p><b>Catatan:</b> Gambar tampil dari kolom <b>Gambar</b> di Excel atau file yang cocok di folder <b>assets</b>.</p>
             </div>
             """)
     else:
-        st.info("Gambar belum ditemukan. Pastikan folder assets berisi gambar, dan kolom Gambar di Excel berisi contoh: assets/serai.jpg atau serai.jpg.")
+        st.info("Gambar belum ditemukan. Isi kolom Gambar di Excel dengan contoh: assets/serai.jpg atau simpan file gambar di folder assets.")
 
 
 def render_relation_table(result):
     html_block('<div class="section-title">🔗 Relation Extraction</div>')
 
     rel_df = pd.DataFrame([
-        [result["Nama Tanaman"], "memiliki nama latin", result["Nama Latin"]],
-        [result["Nama Tanaman"], "memiliki nama lokal/daerah", result["Nama Lokal/Daerah"]],
-        [result["Nama Tanaman"], "menggunakan bagian tanaman", result["Bagian Tanaman"]],
-        [result["Nama Tanaman"], "mengandung senyawa bioaktif", result["Zat Bioaktif"]],
-        [result["Nama Tanaman"], "memiliki khasiat", result["Khasiat/Efek Terapeutik"]],
-        [result["Nama Tanaman"], "diolah dengan cara", result["Cara Pengolahan"]],
-        [result["Nama Tanaman"], "memiliki dosis/komposisi", result["Komposisi/Dosis"]],
-        [result["Nama Tanaman"], "bersumber dari", result["Sumber Data"]],
+        [result.get("Nama Tanaman", "Tanaman"), "memiliki nama latin", result.get("Nama Latin", "Belum terdeteksi")],
+        [result.get("Nama Tanaman", "Tanaman"), "memiliki nama lokal/daerah", result.get("Nama Lokal/Daerah", "Belum terdeteksi")],
+        [result.get("Nama Tanaman", "Tanaman"), "menggunakan bagian tanaman", result.get("Bagian Tanaman", "Belum terdeteksi")],
+        [result.get("Nama Tanaman", "Tanaman"), "mengandung senyawa bioaktif", result.get("Zat Bioaktif", "Belum terdeteksi")],
+        [result.get("Nama Tanaman", "Tanaman"), "memiliki khasiat", result.get("Khasiat/Efek Terapeutik", "Belum terdeteksi")],
+        [result.get("Nama Tanaman", "Tanaman"), "diolah dengan cara", result.get("Cara Pengolahan", "Belum terdeteksi")],
+        [result.get("Nama Tanaman", "Tanaman"), "memiliki dosis/komposisi", result.get("Komposisi/Dosis", "Belum terdeteksi")],
+        [result.get("Nama Tanaman", "Tanaman"), "bersumber dari", result.get("Sumber Data", "Belum terdeteksi")],
     ], columns=["Entitas Sumber", "Relasi", "Entitas Tujuan"])
 
-    st.dataframe(rel_df, width="stretch")
+    st.dataframe(rel_df)
 
 
 def render_kg_section(result):
     html_block('<div class="section-title">🕸️ HerbKG 2.0 Explorer</div>')
-    st.plotly_chart(make_kg_graph(result), width="stretch")
+    try:
+        st.plotly_chart(make_kg_graph(result))
+    except Exception as e:
+        st.warning("Knowledge Graph belum dapat ditampilkan.")
+        st.code(str(e))
 
 
 def render_descriptive_chart():
@@ -1208,7 +1300,7 @@ def render_descriptive_chart():
     if fig is None:
         st.info("Grafik belum dapat dibuat karena kolom nama tanaman tidak ditemukan.")
     else:
-        st.plotly_chart(fig, width="stretch")
+        st.plotly_chart(fig)
 
 
 def render_all_outputs(result, image_path, dataset_status, doc_status, match_status):
@@ -1246,7 +1338,10 @@ def render_preview_kg():
         }
 
     st.subheader("PREVIEW KNOWLEDGE GRAPH")
-    st.plotly_chart(make_kg_graph(sample), width="stretch")
+    try:
+        st.plotly_chart(make_kg_graph(sample))
+    except Exception:
+        st.info("Preview KG belum tersedia.")
 
 
 # =========================================================
@@ -1254,19 +1349,6 @@ def render_preview_kg():
 # =========================================================
 def ds_set_view(view_name):
     st.session_state.downstream_view = view_name
-
-
-def ds_get_columns():
-    return {
-        "nama": find_col(df_data, ["Nama Tanaman", "Nama_Tanaman", "Tanaman", "Nama"]),
-        "latin": find_col(df_data, ["Nama Latin", "Nama_Latin", "Latin"]),
-        "senyawa": find_col(df_data, ["Zat Bioaktif", "Senyawa Bioaktif", "Senyawa_Bioaktif", "Compound", "Senyawa", "Kandungan", "Kandungan Kimia"]),
-        "khasiat": find_col(df_data, ["Khasiat", "Manfaat", "Benefit", "Khasiat/Efek Terapeutik", "Biological Activity", "Biological_Activity"]),
-        "bagian": find_col(df_data, ["Bagian Tanaman", "Bagian Digunakan", "Bagian_Digunakan", "Bagian"]),
-        "sumber": find_col(df_data, ["Sumber Data", "Sumber_Data", "Sumber", "Referensi"]),
-        "dosis": find_col(df_data, ["Komposisi/Dosis", "Dosis", "Komposisi"]),
-        "pengolahan": find_col(df_data, ["Cara Pengolahan", "Cara_Pengolahan", "Pengolahan", "Cara Pemakaian"]),
-    }
 
 
 def ds_plot_count(column_name, title):
@@ -1281,7 +1363,7 @@ def ds_plot_count(column_name, title):
     fig = make_descriptive_chart(df_data, column=column_name, title=title)
 
     if fig:
-        st.plotly_chart(fig, width="stretch")
+        st.plotly_chart(fig)
 
     temp = (
         df_data[column_name]
@@ -1295,11 +1377,11 @@ def ds_plot_count(column_name, title):
     )
 
     temp.columns = ["Kategori", "Jumlah Data"]
-    st.dataframe(temp, width="stretch")
+    st.dataframe(temp)
 
 
 def ds_relation_table(mode):
-    cols = ds_get_columns()
+    cols = get_columns(df_data)
 
     nama = cols["nama"]
     senyawa = cols["senyawa"]
@@ -1372,16 +1454,11 @@ def ds_relation_table(mode):
 
     rel_df = rel_df.fillna("")
     rel_df = rel_df.drop_duplicates().head(50)
-    st.dataframe(rel_df, width="stretch")
-
-
-def ds_tokenize(text):
-    text = clean_text(text)
-    return set([t for t in text.split() if len(t) >= 3])
+    st.dataframe(rel_df)
 
 
 def ds_similarity_analysis(target_name):
-    cols = ds_get_columns()
+    cols = get_columns(df_data)
 
     nama = cols["nama"]
     senyawa = cols["senyawa"]
@@ -1416,7 +1493,7 @@ def ds_similarity_analysis(target_name):
         return
 
     base_text = " ".join([str(target_row.get(c, "")) for c in feature_cols])
-    base_tokens = ds_tokenize(base_text)
+    base_tokens = set([t for t in clean_text(base_text).split() if len(t) >= 3])
 
     scores = []
 
@@ -1427,7 +1504,7 @@ def ds_similarity_analysis(target_name):
             continue
 
         row_text = " ".join([str(row.get(c, "")) for c in feature_cols])
-        row_tokens = ds_tokenize(row_text)
+        row_tokens = set([t for t in clean_text(row_text).split() if len(t) >= 3])
 
         if not base_tokens or not row_tokens:
             score = 0
@@ -1449,7 +1526,7 @@ def ds_similarity_analysis(target_name):
 
     result_df = result_df.sort_values("Skor Kemiripan", ascending=False).head(10)
 
-    st.dataframe(result_df, width="stretch")
+    st.dataframe(result_df)
 
     fig = px.bar(
         result_df,
@@ -1470,11 +1547,11 @@ def ds_similarity_analysis(target_name):
         margin=dict(l=20, r=20, t=60, b=20)
     )
 
-    st.plotly_chart(fig, width="stretch")
+    st.plotly_chart(fig)
 
 
 def ds_recommendation(mode):
-    cols = ds_get_columns()
+    cols = get_columns(df_data)
 
     nama = cols["nama"]
     senyawa = cols["senyawa"]
@@ -1503,7 +1580,7 @@ def ds_recommendation(mode):
             rank_df = df_data[nama].value_counts().head(10).reset_index()
             rank_df.columns = ["Tanaman", "Skor Rekomendasi"]
 
-        st.dataframe(rank_df, width="stretch")
+        st.dataframe(rank_df)
 
         fig = px.bar(
             rank_df,
@@ -1523,7 +1600,7 @@ def ds_recommendation(mode):
             yaxis=dict(autorange="reversed")
         )
 
-        st.plotly_chart(fig, width="stretch")
+        st.plotly_chart(fig)
         return
 
     if mode == "graph_search":
@@ -1555,19 +1632,18 @@ def ds_recommendation(mode):
         st.info("Belum ditemukan rekomendasi berdasarkan kata kunci tersebut.")
     else:
         st.success(f"Ditemukan {len(hasil)} kandidat tanaman herbal.")
-        st.dataframe(hasil[tampil_cols].drop_duplicates().head(50), width="stretch")
+        st.dataframe(hasil[tampil_cols].drop_duplicates().head(50))
 
 
 def render_downstream_result():
     view = st.session_state.downstream_view
-
     st.markdown("---")
 
     if view == "awal":
         st.info("Klik salah satu tombol downstream untuk menampilkan hasil analisis.")
         return
 
-    cols = ds_get_columns()
+    cols = get_columns(df_data)
 
     if view == "deskriptif_tanaman":
         st.subheader("📊 Analisis Deskriptif: Tanaman")
@@ -1652,10 +1728,10 @@ def render_downstream_page():
         </div>
         """)
         st.markdown('<div class="down-btn">', unsafe_allow_html=True)
-        st.button("Tanaman", key="btn_ds_tanaman", on_click=ds_set_view, args=("deskriptif_tanaman",), width="stretch")
-        st.button("Senyawa Bioaktif", key="btn_ds_senyawa", on_click=ds_set_view, args=("deskriptif_senyawa",), width="stretch")
-        st.button("Khasiat", key="btn_ds_khasiat", on_click=ds_set_view, args=("deskriptif_khasiat",), width="stretch")
-        st.button("Sumber Data", key="btn_ds_sumber", on_click=ds_set_view, args=("deskriptif_sumber",), width="stretch")
+        st.button("Tanaman", key="btn_ds_tanaman", on_click=ds_set_view, args=("deskriptif_tanaman",))
+        st.button("Senyawa Bioaktif", key="btn_ds_senyawa", on_click=ds_set_view, args=("deskriptif_senyawa",))
+        st.button("Khasiat", key="btn_ds_khasiat", on_click=ds_set_view, args=("deskriptif_khasiat",))
+        st.button("Sumber Data", key="btn_ds_sumber", on_click=ds_set_view, args=("deskriptif_sumber",))
         st.markdown('</div>', unsafe_allow_html=True)
 
     with col2:
@@ -1666,10 +1742,10 @@ def render_downstream_page():
         </div>
         """)
         st.markdown('<div class="down-btn">', unsafe_allow_html=True)
-        st.button("Tanaman → Senyawa", key="btn_query_ts", on_click=ds_set_view, args=("query_tanaman_senyawa",), width="stretch")
-        st.button("Senyawa → Khasiat", key="btn_query_sk", on_click=ds_set_view, args=("query_senyawa_khasiat",), width="stretch")
-        st.button("Khasiat → Bukti Literatur", key="btn_query_kb", on_click=ds_set_view, args=("query_khasiat_bukti",), width="stretch")
-        st.button("Output: Jalur Relasi", key="btn_query_jalur", on_click=ds_set_view, args=("query_jalur_relasi",), width="stretch")
+        st.button("Tanaman → Senyawa", key="btn_query_ts", on_click=ds_set_view, args=("query_tanaman_senyawa",))
+        st.button("Senyawa → Khasiat", key="btn_query_sk", on_click=ds_set_view, args=("query_senyawa_khasiat",))
+        st.button("Khasiat → Bukti Literatur", key="btn_query_kb", on_click=ds_set_view, args=("query_khasiat_bukti",))
+        st.button("Output: Jalur Relasi", key="btn_query_jalur", on_click=ds_set_view, args=("query_jalur_relasi",))
         st.markdown('</div>', unsafe_allow_html=True)
 
     with col3:
@@ -1680,10 +1756,10 @@ def render_downstream_page():
         </div>
         """)
         st.markdown('<div class="down-btn">', unsafe_allow_html=True)
-        st.button("Kelor → 0,56", key="btn_sim_kelor", on_click=ds_set_view, args=("similarity_kelor",), width="stretch")
-        st.button("Sirih → 0,41", key="btn_sim_sirih", on_click=ds_set_view, args=("similarity_sirih",), width="stretch")
-        st.button("Jahe → 0,39", key="btn_sim_jahe", on_click=ds_set_view, args=("similarity_jahe",), width="stretch")
-        st.button("Kayu Manis → 0,28", key="btn_sim_kayu", on_click=ds_set_view, args=("similarity_kayu_manis",), width="stretch")
+        st.button("Kelor → 0,56", key="btn_sim_kelor", on_click=ds_set_view, args=("similarity_kelor",))
+        st.button("Sirih → 0,41", key="btn_sim_sirih", on_click=ds_set_view, args=("similarity_sirih",))
+        st.button("Jahe → 0,39", key="btn_sim_jahe", on_click=ds_set_view, args=("similarity_jahe",))
+        st.button("Kayu Manis → 0,28", key="btn_sim_kayu", on_click=ds_set_view, args=("similarity_kayu_manis",))
         st.markdown('</div>', unsafe_allow_html=True)
 
     with col4:
@@ -1694,10 +1770,10 @@ def render_downstream_page():
         </div>
         """)
         st.markdown('<div class="down-btn">', unsafe_allow_html=True)
-        st.button("Keluhan / Penyakit", key="btn_rec_keluhan", on_click=ds_set_view, args=("rekomendasi_keluhan",), width="stretch")
-        st.button("Graph Search", key="btn_rec_graph", on_click=ds_set_view, args=("rekomendasi_graph",), width="stretch")
-        st.button("Tanaman Terkait", key="btn_rec_tanaman", on_click=ds_set_view, args=("rekomendasi_tanaman",), width="stretch")
-        st.button("Peringkat Rekomendasi", key="btn_rec_rank", on_click=ds_set_view, args=("rekomendasi_peringkat",), width="stretch")
+        st.button("Keluhan / Penyakit", key="btn_rec_keluhan", on_click=ds_set_view, args=("rekomendasi_keluhan",))
+        st.button("Graph Search", key="btn_rec_graph", on_click=ds_set_view, args=("rekomendasi_graph",))
+        st.button("Tanaman Terkait", key="btn_rec_tanaman", on_click=ds_set_view, args=("rekomendasi_tanaman",))
+        st.button("Peringkat Rekomendasi", key="btn_rec_rank", on_click=ds_set_view, args=("rekomendasi_peringkat",))
         st.markdown('</div>', unsafe_allow_html=True)
 
     render_downstream_result()
@@ -1726,7 +1802,7 @@ def render_downstream_preview():
 
 
 # =========================================================
-# HALAMAN
+# HALAMAN UTAMA
 # =========================================================
 if menu == "🏠 Dashboard":
     top_left, top_right = st.columns([3.2, 1])
@@ -1800,7 +1876,7 @@ elif menu == "📦 Aplikasi Downstream":
 elif menu == "📊 Statistik & Analitik":
     render_descriptive_chart()
     html_block('<div class="section-title">📋 Cuplikan Dataset</div>')
-    st.dataframe(df_data.head(30), width="stretch")
+    safe_dataframe(df_data, n=30)
 
 
 elif menu == "⚙️ Pengaturan":
