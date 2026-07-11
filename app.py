@@ -1,7 +1,7 @@
 import os
 import re
 import html
-import tempfile
+import base64
 from pathlib import Path
 
 import pandas as pd
@@ -15,7 +15,6 @@ import plotly.express as px
 # =========================================================
 APP_TITLE = "HyTBIONEX"
 DATASET_FILE = "Data set 20098+ Gambar.xlsx"
-IMAGE_TABLE_FILE = "Gambar tanaman herbal.xlsx"
 ASSET_DIR = "assets"
 
 st.set_page_config(
@@ -41,14 +40,13 @@ if "last_image" not in st.session_state:
 if "last_status" not in st.session_state:
     st.session_state.last_status = {}
 
+if "input_text" not in st.session_state:
+    st.session_state.input_text = ""
+
 
 # =========================================================
 # FUNGSI DASAR
 # =========================================================
-def html_block(code):
-    st.markdown(code, unsafe_allow_html=True)
-
-
 def safe_text(x):
     if x is None:
         return ""
@@ -76,6 +74,37 @@ def normalize_colname(col):
     col = re.sub(r"[^a-zA-Z0-9À-ÿ\s]", " ", col)
     col = re.sub(r"\s+", " ", col)
     return col.strip()
+
+
+def image_to_base64(path):
+    try:
+        with open(path, "rb") as file:
+            encoded = base64.b64encode(file.read()).decode()
+        ext = Path(path).suffix.lower().replace(".", "")
+        if ext == "jpg":
+            ext = "jpeg"
+        return f"data:image/{ext};base64,{encoded}"
+    except Exception:
+        return ""
+
+
+def find_optional_background():
+    candidates = [
+        "assets/background.png",
+        "assets/background.jpg",
+        "assets/herbal_banner.png",
+        "assets/herbal_banner.jpg",
+        "assets/dashboard_background.png",
+        "assets/dashboard_background.jpg",
+        "background.png",
+        "background.jpg",
+    ]
+
+    for path in candidates:
+        if os.path.exists(path):
+            return image_to_base64(path)
+
+    return ""
 
 
 def find_col(df, candidates):
@@ -113,27 +142,14 @@ def value_from_row(row, col):
     return str(value).strip()
 
 
-def path_exists(path):
-    if path and os.path.exists(path):
-        return path
-    return None
-
-
-# =========================================================
-# LOAD DATASET UTAMA
-# =========================================================
 @st.cache_data(show_spinner=False)
 def load_dataset():
     if not os.path.exists(DATASET_FILE):
-        excel_files = [
-            f for f in os.listdir(".")
-            if f.lower().endswith((".xlsx", ".xls")) and f != IMAGE_TABLE_FILE
-        ]
-
+        excel_files = [f for f in os.listdir(".") if f.lower().endswith((".xlsx", ".xls"))]
         if excel_files:
             dataset_path = excel_files[0]
         else:
-            return pd.DataFrame(), "Dataset Excel utama belum ditemukan."
+            return pd.DataFrame(), "Dataset Excel belum ditemukan."
     else:
         dataset_path = DATASET_FILE
 
@@ -159,95 +175,6 @@ def load_dataset():
         return pd.DataFrame(), f"Gagal membaca dataset: {e}"
 
 
-# =========================================================
-# LOAD DATA GAMBAR TANAMAN
-# =========================================================
-@st.cache_data(show_spinner=False)
-def load_image_mapping():
-    mapping = {}
-
-    if not os.path.exists(IMAGE_TABLE_FILE):
-        return mapping
-
-    try:
-        sheets = pd.read_excel(IMAGE_TABLE_FILE, sheet_name=None)
-        image_df = pd.DataFrame()
-
-        for _, df in sheets.items():
-            if isinstance(df, pd.DataFrame) and not df.empty:
-                image_df = df.fillna("")
-                break
-
-        if not image_df.empty:
-            image_df.columns = [str(c).strip() for c in image_df.columns]
-
-            col_nama = find_col(image_df, ["Nama Tanaman", "Tanaman", "Nama"])
-            col_latin = find_col(image_df, ["Nama Latin", "Latin"])
-            col_gambar = find_col(image_df, ["Gambar", "Image", "Foto", "File Gambar", "Path Gambar"])
-
-            for _, row in image_df.iterrows():
-                nama = value_from_row(row, col_nama)
-                latin = value_from_row(row, col_latin)
-                gambar = value_from_row(row, col_gambar)
-
-                keys = []
-
-                if nama != "Belum terdeteksi":
-                    keys.append(clean_text(nama))
-
-                if latin != "Belum terdeteksi":
-                    keys.append(clean_text(latin))
-
-                for key in keys:
-                    if key:
-                        mapping[key] = {
-                            "nama": nama,
-                            "latin": latin,
-                            "gambar": "" if gambar == "Belum terdeteksi" else gambar,
-                            "embedded": ""
-                        }
-
-        # Ekstrak gambar tertanam dari Excel tambahan
-        try:
-            from openpyxl import load_workbook
-
-            wb = load_workbook(IMAGE_TABLE_FILE)
-            temp_dir = Path(tempfile.gettempdir()) / "hytbionex_embedded_images"
-            temp_dir.mkdir(parents=True, exist_ok=True)
-
-            embedded_paths = []
-
-            for ws in wb.worksheets:
-                images = getattr(ws, "_images", [])
-
-                for idx, img in enumerate(images):
-                    img_data = img._data()
-                    out_path = temp_dir / f"embedded_{ws.title}_{idx}.png"
-
-                    with open(out_path, "wb") as f:
-                        f.write(img_data)
-
-                    embedded_paths.append(str(out_path))
-
-            # Khusus kalau hanya ada 1 gambar tertanam dan ada baris Jahe,
-            # gambar otomatis dikaitkan ke Jahe.
-            if len(embedded_paths) == 1:
-                for key in list(mapping.keys()):
-                    if "jahe" in key or "zingiber" in key:
-                        mapping[key]["embedded"] = embedded_paths[0]
-
-        except Exception:
-            pass
-
-    except Exception:
-        pass
-
-    return mapping
-
-
-# =========================================================
-# BACA DOKUMEN UPLOAD
-# =========================================================
 def read_uploaded_file(uploaded_file):
     if uploaded_file is None:
         return "", "Tidak ada dokumen yang diupload."
@@ -280,11 +207,9 @@ def read_uploaded_file(uploaded_file):
         if name.endswith((".xlsx", ".xls")):
             sheets = pd.read_excel(uploaded_file, sheet_name=None)
             text = ""
-
             for _, df in sheets.items():
                 df = df.fillna("")
                 text += " " + " ".join(df.astype(str).values.flatten())
-
             return text, f"Excel dokumen terbaca: {uploaded_file.name} ({len(text)} karakter)"
 
         return "", "Format dokumen belum didukung."
@@ -293,9 +218,6 @@ def read_uploaded_file(uploaded_file):
         return "", f"Gagal membaca dokumen: {e}"
 
 
-# =========================================================
-# EKSTRAKSI / MATCHING DATASET
-# =========================================================
 def score_row(row, search_text, col_nama, col_latin, col_lokal):
     score = 0
 
@@ -306,7 +228,6 @@ def score_row(row, search_text, col_nama, col_latin, col_lokal):
     if nama and nama != "belum terdeteksi":
         if nama in search_text:
             score += 170
-
         for token in nama.split():
             if len(token) >= 3 and token in search_text:
                 score += 25
@@ -314,14 +235,12 @@ def score_row(row, search_text, col_nama, col_latin, col_lokal):
     if latin and latin != "belum terdeteksi":
         if latin in search_text:
             score += 150
-
         for token in latin.split():
             if len(token) >= 4 and token in search_text:
                 score += 20
 
     if lokal and lokal != "belum terdeteksi":
         parts = re.split(r"[,;/|]", lokal)
-
         for p in parts:
             p = clean_text(p)
             if p and len(p) >= 3 and p in search_text:
@@ -356,7 +275,6 @@ def find_best_match(df, search_text):
     if best_row is not None and best_score > 0:
         nama = value_from_row(best_row, col_nama)
         latin = value_from_row(best_row, col_latin)
-
         return best_row, f"Entitas cocok dengan dataset: {nama} / {latin} | Skor: {best_score}"
 
     return None, "Tidak ditemukan kecocokan entitas tanaman pada dataset."
@@ -402,17 +320,12 @@ def extract_result(row, input_text, df):
     }
 
 
-# =========================================================
-# GAMBAR TANAMAN
-# =========================================================
-def find_plant_image(result, image_mapping):
+def find_plant_image(result):
     gambar = result.get("Gambar", "")
     nama = result.get("Nama Tanaman", "")
-    latin = result.get("Nama Latin", "")
 
     candidates = []
 
-    # Dari kolom Gambar dataset utama
     if gambar and gambar != "Belum terdeteksi":
         candidates.extend([
             gambar,
@@ -421,54 +334,31 @@ def find_plant_image(result, image_mapping):
             os.path.join("images", gambar),
         ])
 
-    # Dari file Gambar tanaman herbal.xlsx
-    map_keys = [clean_text(nama), clean_text(latin)]
+    slug = slugify_filename(nama)
 
-    for key in map_keys:
-        if key in image_mapping:
-            map_item = image_mapping[key]
-
-            map_gambar = map_item.get("gambar", "")
-            map_embedded = map_item.get("embedded", "")
-
-            if map_gambar:
-                candidates.extend([
-                    map_gambar,
-                    os.path.join(ASSET_DIR, map_gambar),
-                    os.path.join("gambar", map_gambar),
-                    os.path.join("images", map_gambar),
-                ])
-
-            if map_embedded:
-                candidates.append(map_embedded)
-
-    # Dari nama file otomatis
-    for item in [nama, latin]:
-        slug = slugify_filename(item)
-
-        if slug:
-            for ext in ["jpg", "jpeg", "png", "webp"]:
-                candidates.extend([
-                    os.path.join(ASSET_DIR, f"{slug}.{ext}"),
-                    os.path.join("gambar", f"{slug}.{ext}"),
-                    os.path.join("images", f"{slug}.{ext}"),
-                    f"{slug}.{ext}",
-                ])
+    if slug:
+        for ext in ["jpg", "jpeg", "png", "webp"]:
+            candidates.extend([
+                os.path.join(ASSET_DIR, f"{slug}.{ext}"),
+                os.path.join("gambar", f"{slug}.{ext}"),
+                os.path.join("images", f"{slug}.{ext}"),
+                f"{slug}.{ext}",
+            ])
 
     for path in candidates:
-        if path_exists(path):
+        if path and os.path.exists(path):
             return path
 
     return None
 
 
-def run_extraction(text_input, uploaded_file, df, dataset_status, image_mapping):
+def run_extraction(text_input, uploaded_file, df, dataset_status):
     doc_text, doc_status = read_uploaded_file(uploaded_file)
     combined_text = f"{text_input} {doc_text}"
 
     row, match_status = find_best_match(df, combined_text)
     result = extract_result(row, text_input, df)
-    image_path = find_plant_image(result, image_mapping)
+    image_path = find_plant_image(result)
 
     st.session_state.last_result = result
     st.session_state.last_image = image_path
@@ -482,7 +372,7 @@ def run_extraction(text_input, uploaded_file, df, dataset_status, image_mapping)
 
 
 # =========================================================
-# GRAFIK DESKRIPTIF DAN KG
+# GRAFIK DAN KG
 # =========================================================
 def make_descriptive_chart(df):
     if df.empty:
@@ -535,13 +425,10 @@ def make_descriptive_chart(df):
 
 def short_label(text, max_len=24):
     text = str(text)
-
     if text in ["", "nan", "None", "Belum terdeteksi"]:
         return "Belum terdeteksi"
-
     if len(text) <= max_len:
         return text
-
     return text[:max_len] + "..."
 
 
@@ -611,10 +498,8 @@ def make_kg_graph(result):
 
         if node["id"] in ["senyawa", "dosis"]:
             border_color = "#f97316"
-
         elif node["id"] in ["latin", "sumber"]:
             border_color = "#a855f7"
-
         elif node["id"] == "khasiat":
             border_color = "#ec4899"
 
@@ -649,31 +534,56 @@ def make_kg_graph(result):
 # =========================================================
 # CSS
 # =========================================================
-html_block("""
-<style>
-.stApp {
-    background: #f5fbf7 !important;
-}
+hero_bg = find_optional_background()
 
-.main .block-container {
+if hero_bg:
+    hero_background_css = f"""
+        linear-gradient(90deg, rgba(255,255,255,0.96), rgba(255,255,255,0.58)),
+        url("{hero_bg}")
+    """
+else:
+    hero_background_css = """
+        radial-gradient(circle at 70% 40%, rgba(187,247,208,0.92), transparent 28%),
+        linear-gradient(135deg, #ffffff 0%, #ecfdf5 55%, #f8fafc 100%)
+    """
+
+st.markdown(f"""
+<style>
+.stApp {{
+    background: #f5fbf7 !important;
+}}
+
+.main .block-container {{
     padding-top: 1.2rem;
     max-width: 1500px;
-}
+}}
 
 /* SIDEBAR */
-[data-testid="stSidebar"] {
+[data-testid="stSidebar"] {{
     background:
         radial-gradient(circle at bottom left, rgba(34,197,94,0.25), transparent 28%),
         radial-gradient(circle at top right, rgba(16,185,129,0.18), transparent 35%),
         linear-gradient(180deg, #021f16 0%, #043b2c 45%, #065f46 100%) !important;
     border-right: 1px solid rgba(255,255,255,0.12);
-}
+}}
 
-[data-testid="stSidebar"] * {
+[data-testid="stSidebar"] * {{
     color: #f8fff8 !important;
-}
+}}
 
-[data-testid="stSidebar"] .stButton > button {
+[data-testid="stSidebar"] h1 {{
+    color: #ffffff !important;
+    font-size: 34px !important;
+    font-weight: 900 !important;
+}}
+
+[data-testid="stSidebar"] h2,
+[data-testid="stSidebar"] h3 {{
+    color: #86efac !important;
+    font-weight: 900 !important;
+}}
+
+[data-testid="stSidebar"] .stButton > button {{
     background: transparent !important;
     color: #f8fff8 !important;
     border: none !important;
@@ -686,15 +596,15 @@ html_block("""
     font-weight: 650 !important;
     margin-bottom: 5px !important;
     width: 100% !important;
-}
+}}
 
-[data-testid="stSidebar"] .stButton > button:hover {
+[data-testid="stSidebar"] .stButton > button:hover {{
     background: rgba(255,255,255,0.12) !important;
     color: #ffffff !important;
     transform: translateX(3px);
-}
+}}
 
-.nav-active {
+.nav-active {{
     background:
         linear-gradient(90deg, rgba(34,197,94,0.38), rgba(16,185,129,0.20)) !important;
     border: 1px solid rgba(134,239,172,0.28);
@@ -705,9 +615,9 @@ html_block("""
     color: #ffffff !important;
     font-size: 16px;
     font-weight: 800;
-}
+}}
 
-.sidebar-section-title {
+.sidebar-section-title {{
     color: #86efac !important;
     font-size: 13px !important;
     font-weight: 900 !important;
@@ -715,37 +625,37 @@ html_block("""
     margin-top: 22px;
     margin-bottom: 10px;
     text-transform: uppercase;
-}
+}}
 
-.sidebar-line {
+.sidebar-line {{
     height: 1px;
     background: rgba(255,255,255,0.14);
     margin: 18px 0;
-}
+}}
 
-.sidebar-footer {
+.sidebar-footer {{
     margin-top: 28px;
     padding: 18px;
     border-radius: 18px;
     background: rgba(255,255,255,0.08);
     border: 1px solid rgba(255,255,255,0.14);
-}
+}}
 
-.sidebar-footer h3 {
+.sidebar-footer h3 {{
     color: #ffffff !important;
     margin: 0 0 6px 0 !important;
     font-size: 17px !important;
     font-weight: 900 !important;
-}
+}}
 
-.sidebar-footer p {
+.sidebar-footer p {{
     color: #d1fae5 !important;
     margin: 0 !important;
     font-size: 12px !important;
-}
+}}
 
-/* HEADER */
-.top-header {
+/* HEADER ATAS */
+.top-header {{
     background:
         linear-gradient(135deg, rgba(1,50,32,0.98), rgba(6,78,59,0.98), rgba(5,95,70,0.98));
     padding: 24px 30px;
@@ -757,35 +667,35 @@ html_block("""
     grid-template-columns: 1.2fr 1.5fr 0.85fr;
     gap: 18px;
     align-items: center;
-}
+}}
 
-.top-header h1 {
+.top-header h1 {{
     margin: 0;
     font-size: 38px;
     font-weight: 900;
     color: #ffffff;
-}
+}}
 
-.top-header h2 {
+.top-header h2 {{
     margin: 0;
     font-size: 28px;
     font-weight: 900;
     color: #bbf7d0;
-}
+}}
 
-.top-header p {
+.top-header p {{
     margin: 5px 0 0 0;
     color: #ecfdf5;
-}
+}}
 
-.top-user {
+.top-user {{
     display: flex;
     gap: 12px;
     justify-content: flex-end;
     align-items: center;
-}
+}}
 
-.top-pill {
+.top-pill {{
     background: rgba(255,255,255,0.10);
     padding: 11px 14px;
     border-radius: 16px;
@@ -793,9 +703,9 @@ html_block("""
     color: #ffffff;
     font-weight: 800;
     font-size: 14px;
-}
+}}
 
-.user-card {
+.user-card {{
     background: rgba(255,255,255,0.10);
     padding: 10px 14px;
     border-radius: 16px;
@@ -803,36 +713,42 @@ html_block("""
     color: #ffffff;
     font-weight: 800;
     min-width: 145px;
-}
+}}
 
 /* DASHBOARD */
-.hero-banner {
-    background:
-        radial-gradient(circle at 70% 40%, rgba(187,247,208,0.92), transparent 28%),
-        linear-gradient(135deg, #ffffff 0%, #ecfdf5 55%, #f8fafc 100%);
+.dashboard-shell {{
+    background: rgba(255,255,255,0.92);
+    border-radius: 30px;
+    padding: 22px;
+    box-shadow: 0 18px 44px rgba(15,23,42,0.13);
+    border: 1px solid rgba(6,78,59,0.10);
+}}
+
+.hero-banner {{
+    background: {hero_background_css};
     background-size: cover;
     background-position: center;
     padding: 34px 32px;
     border-radius: 22px;
     min-height: 215px;
     box-shadow: inset 0 0 0 1px rgba(6,78,59,0.08);
-}
+}}
 
-.hero-banner h2 {
+.hero-banner h2 {{
     color: #047857;
     font-size: 30px;
     font-weight: 900;
     margin-bottom: 14px;
-}
+}}
 
-.hero-banner p {
+.hero-banner p {{
     color: #12372a;
     font-size: 17px;
     line-height: 1.65;
     max-width: 680px;
-}
+}}
 
-.input-panel {
+.single-input-card {{
     background: rgba(255,255,255,0.97);
     padding: 25px;
     border-radius: 22px;
@@ -840,33 +756,49 @@ html_block("""
     border: 1px solid rgba(6,78,59,0.10);
     margin-top: 18px;
     margin-bottom: 18px;
-}
+}}
 
-.input-panel h3 {
+.single-input-card h3 {{
     color: #064e3b;
     margin: 0 0 10px 0;
     font-weight: 900;
-}
+}}
 
-textarea {
+.single-input-card p {{
+    color: #334155;
+}}
+
+textarea {{
     background: #ffffff !important;
     color: #0f172a !important;
     border: 1px solid #d1d5db !important;
     border-radius: 12px !important;
-}
+}}
 
-[data-testid="stFileUploader"] section {
+textarea::placeholder {{
+    color: #94a3b8 !important;
+}}
+
+[data-testid="stFileUploader"] section {{
     background: #fbfffb !important;
     border: 2px dashed #86efac !important;
     border-radius: 16px !important;
     min-height: 125px;
-}
+}}
 
-[data-testid="stFileUploader"] section * {
+[data-testid="stFileUploader"] section * {{
     color: #0f172a !important;
-}
+}}
 
-.stButton > button {
+[data-testid="stFileUploader"] button {{
+    background: #ffffff !important;
+    color: #047857 !important;
+    border: 1px solid #bbf7d0 !important;
+    border-radius: 12px !important;
+    font-weight: 800 !important;
+}}
+
+.stButton > button {{
     background: linear-gradient(90deg, #047857, #059669) !important;
     color: #ffffff !important;
     border: none !important;
@@ -874,9 +806,91 @@ textarea {
     font-weight: 900 !important;
     padding: 0.72rem 1rem !important;
     box-shadow: 0 8px 18px rgba(4,120,87,0.18);
-}
+}}
 
-.result-card {
+.stButton > button:hover {{
+    background: linear-gradient(90deg, #065f46, #047857) !important;
+    color: white !important;
+}}
+
+.summary-card {{
+    background: rgba(255,255,255,0.96);
+    padding: 22px;
+    border-radius: 20px;
+    box-shadow: 0 12px 28px rgba(15,23,42,0.10);
+    border: 1px solid rgba(6,78,59,0.10);
+}}
+
+.summary-item {{
+    display: flex;
+    gap: 14px;
+    align-items: center;
+    margin-bottom: 22px;
+}}
+
+.summary-icon {{
+    width: 48px;
+    height: 48px;
+    border-radius: 16px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    font-size: 25px;
+    background:#ecfdf5;
+}}
+
+.summary-label {{
+    color:#047857;
+    font-weight:800;
+}}
+
+.summary-value {{
+    color:#16a34a;
+    font-size:24px;
+    font-weight:900;
+}}
+
+.quick-card {{
+    background: rgba(255,255,255,0.96);
+    padding: 18px;
+    border-radius: 18px;
+    border: 1px solid rgba(6,78,59,0.10);
+    box-shadow: 0 10px 24px rgba(15,23,42,0.08);
+    text-align:center;
+    min-height: 205px;
+}}
+
+.quick-card h4 {{
+    color: #064e3b;
+    font-weight: 900;
+}}
+
+.quick-card p {{
+    color: #334155;
+    font-size: 14px;
+}}
+
+.quick-btn {{
+    display:inline-block;
+    margin-top:10px;
+    padding:8px 18px;
+    border-radius:999px;
+    border:1px solid #86efac;
+    color:#047857;
+    font-weight:800;
+    background:#f8fff8;
+}}
+
+.lilac-card {{
+    background: #f3e8ff;
+    padding: 22px;
+    border-radius: 18px;
+    border: 2px solid #c084fc;
+    color: #111111;
+    margin-bottom: 18px;
+}}
+
+.result-card {{
     background: #ffffff;
     border-left: 7px solid #047857;
     border-radius: 15px;
@@ -884,59 +898,69 @@ textarea {
     min-height: 112px;
     box-shadow: 0 8px 18px rgba(15,23,42,0.09);
     margin-bottom: 12px;
-}
+}}
 
-.result-card h4 {
+.result-card h4 {{
     color: #064e3b;
     font-weight: 900;
     margin-bottom: 7px;
-}
+}}
 
-.result-card p {
+.result-card p {{
     color: #0f172a;
     font-size: 16px;
     line-height: 1.5;
-}
+}}
 
-.section-title {
+.section-title {{
     color: #064e3b;
     font-size: 27px;
     font-weight: 900;
     margin-top: 22px;
     margin-bottom: 13px;
-}
+}}
 
-.lilac-card {
-    background: #f3e8ff;
-    padding: 22px;
-    border-radius: 18px;
-    border: 2px solid #c084fc;
-    color: #111111;
+.graph-box {{
+    background: #ffffff;
+    border-radius: 20px;
+    padding: 18px;
+    box-shadow: 0 10px 25px rgba(15,23,42,0.09);
+    border: 1px solid rgba(6,78,59,0.10);
     margin-bottom: 18px;
-}
+}}
 
-.downstream-card {
+.footer-status {{
+    background: rgba(255,255,255,0.94);
+    border-radius: 16px;
+    padding: 17px;
+    border: 1px solid rgba(6,78,59,0.12);
+    color:#064e3b;
+    font-weight:800;
+    text-align:center;
+}}
+
+.downstream-card {{
     background: #ffffff;
     border-radius: 20px;
     padding: 18px;
     box-shadow: 0 10px 24px rgba(15,23,42,0.08);
     border: 1px solid rgba(6,78,59,0.12);
     min-height: 360px;
-}
+}}
 
-.downstream-card h4 {
+.downstream-card h4 {{
     color: #064e3b;
     font-weight: 900;
     text-align: center;
-}
+}}
 
-.downstream-card p {
+.downstream-card p {{
     color: #334155;
     font-size: 14px;
     line-height: 1.5;
-}
+}}
 
-.flow-box {
+.flow-box {{
     background: #f0fdf4;
     border: 1px solid #bbf7d0;
     color: #064e3b;
@@ -945,34 +969,9 @@ textarea {
     text-align: center;
     margin-bottom: 8px;
     font-weight: 800;
-}
-
-.footer-status {
-    background: rgba(255,255,255,0.94);
-    border-radius: 16px;
-    padding: 17px;
-    border: 1px solid rgba(6,78,59,0.12);
-    color:#064e3b;
-    font-weight:800;
-    text-align:center;
-}
+}}
 </style>
-""")
-
-
-# =========================================================
-# LOAD DATA
-# =========================================================
-df_data, dataset_status = load_dataset()
-image_mapping = load_image_mapping()
-
-col_senyawa = find_col(df_data, ["Zat Bioaktif", "Senyawa Bioaktif", "Senyawa", "Compound", "Kandungan"])
-col_khasiat = find_col(df_data, ["Khasiat", "Manfaat", "Benefit", "Khasiat/Efek Terapeutik", "Biological Activity"])
-
-total_data = len(df_data)
-total_senyawa = df_data[col_senyawa].astype(str).replace("", pd.NA).dropna().nunique() if col_senyawa else 0
-total_khasiat = df_data[col_khasiat].astype(str).replace("", pd.NA).dropna().nunique() if col_khasiat else 0
-total_relasi = total_data * 8 if total_data else 0
+""", unsafe_allow_html=True)
 
 
 # =========================================================
@@ -984,10 +983,7 @@ def set_page(page_name):
 
 def sidebar_button(label, page_name, key):
     if st.session_state.page == page_name:
-        st.sidebar.markdown(
-            f'<div class="nav-active">{label}</div>',
-            unsafe_allow_html=True
-        )
+        st.sidebar.markdown(f'<div class="nav-active">{label}</div>', unsafe_allow_html=True)
     else:
         if st.sidebar.button(label, key=key, use_container_width=True):
             set_page(page_name)
@@ -1001,8 +997,8 @@ st.sidebar.markdown('<div class="sidebar-line"></div>', unsafe_allow_html=True)
 sidebar_button("🏠 Dashboard", "🏠 Dashboard", "nav_dashboard")
 
 st.sidebar.markdown('<div class="sidebar-section-title">ANALISIS DATA</div>', unsafe_allow_html=True)
-sidebar_button("🌿 Input Tanaman", "🌿 Input Tanaman", "nav_input")
-sidebar_button("📄 Upload Dokumen", "📁 Upload Dokumen", "nav_upload")
+sidebar_button("🌿 Input Tanaman\n(Kata / Kalimat)", "🌿 Input Tanaman", "nav_input")
+sidebar_button("📄 Upload Dokumen\n(PDF / Excel)", "📁 Upload Dokumen", "nav_upload")
 sidebar_button("📋 Hasil Isolasi Entitas", "📋 Hasil Isolasi Entitas", "nav_hasil")
 sidebar_button("🔗 Relation Extraction", "🔗 Relation Extraction", "nav_relasi")
 sidebar_button("🕸️ HerbKG 2.0 Explorer", "🕸️ HerbKG 2.0 Explorer", "nav_kg")
@@ -1031,7 +1027,7 @@ menu = st.session_state.page
 # =========================================================
 # HEADER ATAS
 # =========================================================
-html_block("""
+st.markdown("""
 <div class="top-header">
     <div>
         <h1>🌿 HyTBIONEX</h1>
@@ -1047,41 +1043,73 @@ html_block("""
         <div class="user-card">👩‍🔬 Nazwita<br><small>Researcher</small></div>
     </div>
 </div>
-""")
+""", unsafe_allow_html=True)
+
+
+# =========================================================
+# LOAD DATA
+# =========================================================
+df_data, dataset_status = load_dataset()
+
+col_senyawa = find_col(df_data, ["Zat Bioaktif", "Senyawa Bioaktif", "Senyawa", "Compound", "Kandungan"])
+col_khasiat = find_col(df_data, ["Khasiat", "Manfaat", "Benefit", "Khasiat/Efek Terapeutik", "Biological Activity"])
+
+total_data = len(df_data)
+total_senyawa = df_data[col_senyawa].astype(str).replace("", pd.NA).dropna().nunique() if col_senyawa else 0
+total_khasiat = df_data[col_khasiat].astype(str).replace("", pd.NA).dropna().nunique() if col_khasiat else 0
+total_relasi = total_data * 8 if total_data else 0
 
 
 # =========================================================
 # RENDER KOMPONEN
 # =========================================================
 def render_summary_card():
-    with st.container():
-        st.subheader("RINGKASAN DATA")
+    st.markdown(f"""
+    <div class="summary-card">
+        <h3 style="color:#064e3b;margin-bottom:25px;">RINGKASAN DATA</h3>
 
-        m1, m2 = st.columns(2)
-        m3, m4 = st.columns(2)
+        <div class="summary-item">
+            <div class="summary-icon">🌿</div>
+            <div>
+                <div class="summary-label">Total Tanaman</div>
+                <div class="summary-value">{total_data:,}</div>
+            </div>
+        </div>
 
-        with m1:
-            st.metric("🌿 Total Tanaman", f"{total_data:,}")
+        <div class="summary-item">
+            <div class="summary-icon">🧪</div>
+            <div>
+                <div class="summary-label" style="color:#0284c7;">Total Senyawa</div>
+                <div class="summary-value" style="color:#0284c7;">{total_senyawa:,}</div>
+            </div>
+        </div>
 
-        with m2:
-            st.metric("🧪 Total Senyawa", f"{total_senyawa:,}")
+        <div class="summary-item">
+            <div class="summary-icon">💗</div>
+            <div>
+                <div class="summary-label" style="color:#e11d48;">Total Khasiat</div>
+                <div class="summary-value" style="color:#e11d48;">{total_khasiat:,}</div>
+            </div>
+        </div>
 
-        with m3:
-            st.metric("💗 Total Khasiat", f"{total_khasiat:,}")
+        <div class="summary-item">
+            <div class="summary-icon">🔗</div>
+            <div>
+                <div class="summary-label" style="color:#7c3aed;">Relasi Triplet</div>
+                <div class="summary-value" style="color:#7c3aed;">{total_relasi:,}</div>
+            </div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
 
-        with m4:
-            st.metric("🔗 Relasi Triplet", f"{total_relasi:,}")
 
-        st.caption("Dataset dan relasi dihitung otomatis dari file Excel.")
-
-
-def render_input_area():
-    html_block("""
-    <div class="input-panel">
+def render_single_input_area():
+    st.markdown("""
+    <div class="single-input-card">
         <h3>📝 Input Tanaman dan Dokumen</h3>
         <p>Masukkan nama tanaman atau kalimat, lalu unggah dokumen jika ada. Sistem akan mencocokkan informasi dengan dataset herbal.</p>
     </div>
-    """)
+    """, unsafe_allow_html=True)
 
     col1, col2 = st.columns([1.1, 1])
 
@@ -1111,16 +1139,63 @@ def render_input_area():
                     text_input,
                     uploaded_file,
                     df_data,
-                    dataset_status,
-                    image_mapping
+                    dataset_status
                 )
 
             st.success("Proses analisis selesai.")
             render_all_outputs(result, image_path, dataset_status, doc_status, match_status)
 
 
+def render_quick_access():
+    st.markdown('<div class="graph-box"><h3 style="color:#064e3b;">AKSES CEPAT ANALISIS</h3>', unsafe_allow_html=True)
+
+    q1, q2, q3, q4 = st.columns(4)
+
+    with q1:
+        st.markdown("""
+        <div class="quick-card">
+            <div style="font-size:45px;">📖</div>
+            <h4>Hasil Isolasi Entitas</h4>
+            <p>Lihat entitas yang telah diidentifikasi</p>
+            <div class="quick-btn">Lihat Data →</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with q2:
+        st.markdown("""
+        <div class="quick-card">
+            <div style="font-size:45px;">🔗</div>
+            <h4>Relation Extraction</h4>
+            <p>Ekstraksi relasi antar entitas</p>
+            <div class="quick-btn">Lihat Relasi →</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with q3:
+        st.markdown("""
+        <div class="quick-card">
+            <div style="font-size:45px;">🧬</div>
+            <h4>HerbKG 2.0 Explorer</h4>
+            <p>Jelajahi graf pengetahuan tanaman herbal</p>
+            <div class="quick-btn">Jelajah →</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with q4:
+        st.markdown("""
+        <div class="quick-card">
+            <div style="font-size:45px;">📊</div>
+            <h4>Statistik & Analitik</h4>
+            <p>Visualisasi statistik dan analisis data</p>
+            <div class="quick-btn">Lihat Statistik →</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    st.markdown("</div>", unsafe_allow_html=True)
+
+
 def render_result_cards(result):
-    html_block('<div class="section-title">📋 Hasil Ekstraksi Informasi Bioaktif</div>')
+    st.markdown('<div class="section-title">📋 Hasil Ekstraksi Informasi Bioaktif</div>', unsafe_allow_html=True)
 
     cards = [
         ("🌿 Nama Tanaman", result["Nama Tanaman"]),
@@ -1141,39 +1216,37 @@ def render_result_cards(result):
         for col in row_cols:
             title, value = cards[idx]
             with col:
-                html_block(f"""
+                st.markdown(f"""
                 <div class="result-card">
                     <h4>{safe_text(title)}</h4>
                     <p>{safe_text(value)}</p>
                 </div>
-                """)
+                """, unsafe_allow_html=True)
             idx += 1
 
 
 def render_image_section(result, image_path):
-    html_block('<div class="section-title">🖼️ Lampiran Gambar Tanaman</div>')
+    st.markdown('<div class="section-title">🖼️ Lampiran Gambar Tanaman</div>', unsafe_allow_html=True)
 
     if image_path:
         c1, c2 = st.columns([1, 2])
-
         with c1:
             st.image(image_path, caption=result["Nama Tanaman"], use_container_width=True)
-
         with c2:
-            html_block(f"""
+            st.markdown(f"""
             <div class="lilac-card">
                 <h3>🌿 Gambar Tanaman Terkoneksi Dataset</h3>
                 <p><b>Nama Tanaman:</b> {safe_text(result["Nama Tanaman"])}</p>
                 <p><b>Nama Latin:</b> {safe_text(result["Nama Latin"])}</p>
-                <p><b>Catatan:</b> Gambar ditampilkan dari kolom <b>Gambar</b> pada dataset, folder <b>assets</b>, atau file <b>Gambar tanaman herbal.xlsx</b>.</p>
+                <p><b>Catatan:</b> Gambar ini ditampilkan dari kolom <b>Gambar</b> pada dataset Excel atau nama file yang sesuai di folder <b>assets</b>.</p>
             </div>
-            """)
+            """, unsafe_allow_html=True)
     else:
-        st.info("Gambar belum ditemukan. Isi kolom Gambar di Excel, contoh: assets/jahe.jpg atau jahe.jpg.")
+        st.info("Gambar belum ditemukan. Pastikan Excel memiliki kolom Gambar, contoh isi: assets/jahe.jpg atau jahe.jpg.")
 
 
 def render_relation_table(result):
-    html_block('<div class="section-title">🔗 Relation Extraction</div>')
+    st.markdown('<div class="section-title">🔗 Relation Extraction</div>', unsafe_allow_html=True)
 
     rel_df = pd.DataFrame([
         [result["Nama Tanaman"], "memiliki nama latin", result["Nama Latin"]],
@@ -1190,12 +1263,12 @@ def render_relation_table(result):
 
 
 def render_kg_section(result):
-    html_block('<div class="section-title">🕸️ HerbKG 2.0 Explorer</div>')
+    st.markdown('<div class="section-title">🕸️ HerbKG 2.0 Explorer</div>', unsafe_allow_html=True)
     st.plotly_chart(make_kg_graph(result), use_container_width=True)
 
 
 def render_descriptive_chart():
-    html_block('<div class="section-title">📊 Grafik Analisis Deskriptif</div>')
+    st.markdown('<div class="section-title">📊 Grafik Analisis Deskriptif</div>', unsafe_allow_html=True)
 
     fig = make_descriptive_chart(df_data)
 
@@ -1206,14 +1279,14 @@ def render_descriptive_chart():
 
 
 def render_all_outputs(result, image_path, dataset_status, doc_status, match_status):
-    html_block(f"""
+    st.markdown(f"""
     <div class="lilac-card">
         <h3>📌 Status Sistem</h3>
         <p><b>Status Dataset:</b> {safe_text(dataset_status)}</p>
         <p><b>Status Dokumen:</b> {safe_text(doc_status)}</p>
         <p><b>Status Koneksi Entitas:</b> {safe_text(match_status)}</p>
     </div>
-    """)
+    """, unsafe_allow_html=True)
 
     render_result_cards(result)
     render_image_section(result, image_path)
@@ -1239,22 +1312,27 @@ def render_preview_kg():
             "Gambar": "Belum terdeteksi",
         }
 
-    st.subheader("PREVIEW KNOWLEDGE GRAPH")
+    st.markdown('<div class="summary-card"><h3 style="color:#064e3b;">PREVIEW KNOWLEDGE GRAPH</h3>', unsafe_allow_html=True)
     st.plotly_chart(make_kg_graph(sample), use_container_width=True)
+    st.markdown('</div>', unsafe_allow_html=True)
 
 
 def render_downstream_page():
-    html_block('<div class="section-title">📦 Aplikasi Downstream</div>')
+    st.markdown('<div class="section-title">📦 Aplikasi Downstream</div>', unsafe_allow_html=True)
 
-    st.write(
-        "Aplikasi downstream memanfaatkan hasil ekstraksi entitas dan relasi dari HerbKG 2.0 "
-        "untuk analisis deskriptif, query graf berbasis bukti, analisis kemiripan, dan rekomendasi herbal."
-    )
+    st.markdown("""
+    <div class="graph-box">
+        <p style="color:#334155;font-size:16px;">
+        Aplikasi downstream memanfaatkan hasil ekstraksi entitas dan relasi dari HerbKG 2.0
+        untuk analisis deskriptif, query graf berbasis bukti, analisis kemiripan, dan rekomendasi herbal.
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
 
     d1, d2, d3, d4 = st.columns(4)
 
     with d1:
-        html_block("""
+        st.markdown("""
         <div class="downstream-card">
             <h4>1. Analisis Deskriptif</h4>
             <p>Menampilkan ringkasan statistik entitas, relasi, dan distribusi data herbal.</p>
@@ -1263,10 +1341,10 @@ def render_downstream_page():
             <div class="flow-box">Khasiat</div>
             <div class="flow-box">Sumber Data</div>
         </div>
-        """)
+        """, unsafe_allow_html=True)
 
     with d2:
-        html_block("""
+        st.markdown("""
         <div class="downstream-card">
             <h4>2. Query Graf Berbasis Bukti</h4>
             <p>Menelusuri hubungan tanaman, senyawa, khasiat, dan sumber literatur.</p>
@@ -1275,10 +1353,10 @@ def render_downstream_page():
             <div class="flow-box">Khasiat → Bukti Literatur</div>
             <div class="flow-box">Output: Jalur Relasi</div>
         </div>
-        """)
+        """, unsafe_allow_html=True)
 
     with d3:
-        html_block("""
+        st.markdown("""
         <div class="downstream-card">
             <h4>3. Analisis Kemiripan</h4>
             <p>Menemukan tanaman yang mirip berdasarkan senyawa dan khasiat.</p>
@@ -1287,10 +1365,10 @@ def render_downstream_page():
             <div class="flow-box">Jahe → 0,39</div>
             <div class="flow-box">Kayu Manis → 0,28</div>
         </div>
-        """)
+        """, unsafe_allow_html=True)
 
     with d4:
-        html_block("""
+        st.markdown("""
         <div class="downstream-card">
             <h4>4. Rekomendasi Herbal</h4>
             <p>Memberikan rekomendasi tanaman herbal berbasis khasiat dan relasi graf.</p>
@@ -1299,7 +1377,7 @@ def render_downstream_page():
             <div class="flow-box">Tanaman Terkait</div>
             <div class="flow-box">Peringkat Rekomendasi</div>
         </div>
-        """)
+        """, unsafe_allow_html=True)
 
     render_descriptive_chart()
 
@@ -1308,10 +1386,12 @@ def render_downstream_page():
 # HALAMAN
 # =========================================================
 if menu == "🏠 Dashboard":
+    st.markdown('<div class="dashboard-shell">', unsafe_allow_html=True)
+
     top_left, top_right = st.columns([3.2, 1])
 
     with top_left:
-        html_block("""
+        st.markdown("""
         <div class="hero-banner">
             <h2>Selamat datang di HyTBIONEX</h2>
             <p>
@@ -1319,35 +1399,31 @@ if menu == "🏠 Dashboard":
             menggunakan pendekatan Hybrid Transformer serta integrasi HerbKG 2.0.
             </p>
         </div>
-        """)
+        """, unsafe_allow_html=True)
 
     with top_right:
         render_summary_card()
 
-    render_input_area()
+    render_single_input_area()
 
     down_left, down_right = st.columns([2, 1])
 
     with down_left:
-        render_downstream_page()
+        render_quick_access()
 
     with down_right:
         render_preview_kg()
 
     f1, f2, f3 = st.columns(3)
+    f1.markdown("<div class='footer-status'>⚙️ Model Aktif: Hybrid Transformer</div>", unsafe_allow_html=True)
+    f2.markdown("<div class='footer-status'>🧬 Pipeline: NED → BIE → RE → HerbKG 2.0</div>", unsafe_allow_html=True)
+    f3.markdown("<div class='footer-status'>🛡️ Status: Sistem siap digunakan</div>", unsafe_allow_html=True)
 
-    with f1:
-        st.success("⚙️ Model Aktif: Hybrid Transformer")
-
-    with f2:
-        st.success("🧬 Pipeline: NED → BIE → RE → HerbKG 2.0")
-
-    with f3:
-        st.success("🛡️ Status: Sistem siap digunakan")
+    st.markdown('</div>', unsafe_allow_html=True)
 
 
 elif menu in ["🌿 Input Tanaman", "📁 Upload Dokumen"]:
-    render_input_area()
+    render_single_input_area()
 
 
 elif menu == "📋 Hasil Isolasi Entitas":
@@ -1378,21 +1454,21 @@ elif menu == "📦 Aplikasi Downstream":
 
 elif menu == "📊 Statistik & Analitik":
     render_descriptive_chart()
-    html_block('<div class="section-title">📋 Cuplikan Dataset</div>')
+    st.markdown('<div class="section-title">📋 Cuplikan Dataset</div>', unsafe_allow_html=True)
     st.dataframe(df_data.head(30), use_container_width=True)
 
 
 elif menu == "⚙️ Pengaturan":
-    html_block("""
+    st.markdown("""
     <div class="lilac-card">
         <h2>⚙️ Pengaturan Sistem</h2>
         <p>Halaman ini disiapkan untuk pengaturan model, dataset, pipeline, dan tampilan sistem.</p>
     </div>
-    """)
+    """, unsafe_allow_html=True)
 
 
 elif menu == "ℹ️ Tentang Aplikasi":
-    html_block("""
+    st.markdown("""
     <div class="lilac-card">
         <h2>ℹ️ Tentang HyTBIONEX</h2>
         <p>
@@ -1402,4 +1478,4 @@ elif menu == "ℹ️ Tentang Aplikasi":
         </p>
         <p><b>Researcher:</b> Nazwita</p>
     </div>
-    """)
+    """, unsafe_allow_html=True)
