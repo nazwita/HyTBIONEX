@@ -993,7 +993,7 @@ def sidebar_button(label, page_name, key):
             unsafe_allow_html=True
         )
     else:
-        if st.sidebar.button(label, key=key, width="stretch"=True):
+        if st.sidebar.button(label, key=key, width="stretch"):
             set_page(page_name)
             st.rerun()
 
@@ -1103,7 +1103,7 @@ def render_input_area():
             key="main_uploaded_file"
         )
 
-    submit = st.button("🔍 Proses Analisis", width="stretch"=True, key="btn_process_all")
+    submit = st.button("🔍 Proses Analisis", width="stretch", key="btn_process_all")
 
     if submit:
         if not text_input and uploaded_file is None:
@@ -1160,7 +1160,7 @@ def render_image_section(result, image_path):
         c1, c2 = st.columns([1, 2])
 
         with c1:
-            st.image(image_path, caption=result["Nama Tanaman"], width="stretch"=True)
+            st.image(image_path, caption=result["Nama Tanaman"], width="stretch")
 
         with c2:
             html_block(f"""
@@ -1189,12 +1189,12 @@ def render_relation_table(result):
         [result["Nama Tanaman"], "bersumber dari", result["Sumber Data"]],
     ], columns=["Entitas Sumber", "Relasi", "Entitas Tujuan"])
 
-    st.dataframe(rel_df, width="stretch"=True)
+    st.dataframe(rel_df, width="stretch")
 
 
 def render_kg_section(result):
     html_block('<div class="section-title">🕸️ HerbKG 2.0 Explorer</div>')
-    st.plotly_chart(make_kg_graph(result), width="stretch"=True)
+    st.plotly_chart(make_kg_graph(result), width="stretch")
 
 
 def render_descriptive_chart():
@@ -1208,7 +1208,7 @@ def render_descriptive_chart():
     if fig is None:
         st.info("Grafik belum dapat dibuat karena kolom nama tanaman tidak ditemukan.")
     else:
-        st.plotly_chart(fig, width="stretch"=True)
+        st.plotly_chart(fig, width="stretch")
 
 
 def render_all_outputs(result, image_path, dataset_status, doc_status, match_status):
@@ -1246,7 +1246,7 @@ def render_preview_kg():
         }
 
     st.subheader("PREVIEW KNOWLEDGE GRAPH")
-    st.plotly_chart(make_kg_graph(sample), width="stretch"=True)
+    st.plotly_chart(make_kg_graph(sample), width="stretch")
 
 
 # =========================================================
@@ -1281,7 +1281,7 @@ def ds_plot_count(column_name, title):
     fig = make_descriptive_chart(df_data, column=column_name, title=title)
 
     if fig:
-        st.plotly_chart(fig, width="stretch"=True)
+        st.plotly_chart(fig, width="stretch")
 
     temp = (
         df_data[column_name]
@@ -1295,7 +1295,7 @@ def ds_plot_count(column_name, title):
     )
 
     temp.columns = ["Kategori", "Jumlah Data"]
-    st.dataframe(temp, width="stretch"=True)
+    st.dataframe(temp, width="stretch")
 
 
 def ds_relation_table(mode):
@@ -1372,7 +1372,7 @@ def ds_relation_table(mode):
 
     rel_df = rel_df.fillna("")
     rel_df = rel_df.drop_duplicates().head(50)
-    st.dataframe(rel_df, width="stretch"=True)
+    st.dataframe(rel_df, width="stretch")
 
 
 def ds_tokenize(text):
@@ -1449,7 +1449,7 @@ def ds_similarity_analysis(target_name):
 
     result_df = result_df.sort_values("Skor Kemiripan", ascending=False).head(10)
 
-    st.dataframe(result_df, width="stretch"=True)
+    st.dataframe(result_df, width="stretch")
 
     fig = px.bar(
         result_df,
@@ -1470,7 +1470,7 @@ def ds_similarity_analysis(target_name):
         margin=dict(l=20, r=20, t=60, b=20)
     )
 
-    st.plotly_chart(fig, width="stretch"=True)
+    st.plotly_chart(fig, width="stretch")
 
 
 def ds_recommendation(mode):
@@ -1503,7 +1503,7 @@ def ds_recommendation(mode):
             rank_df = df_data[nama].value_counts().head(10).reset_index()
             rank_df.columns = ["Tanaman", "Skor Rekomendasi"]
 
-        st.dataframe(rank_df, width="stretch"=True)
+        st.dataframe(rank_df, width="stretch")
 
         fig = px.bar(
             rank_df,
@@ -1523,7 +1523,7 @@ def ds_recommendation(mode):
             yaxis=dict(autorange="reversed")
         )
 
-        st.plotly_chart(fig, width="stretch"=True)
+        st.plotly_chart(fig, width="stretch")
         return
 
     if mode == "graph_search":
@@ -1555,7 +1555,7 @@ def ds_recommendation(mode):
         st.info("Belum ditemukan rekomendasi berdasarkan kata kunci tersebut.")
     else:
         st.success(f"Ditemukan {len(hasil)} kandidat tanaman herbal.")
-        st.dataframe(hasil[tampil_cols].drop_duplicates().head(50), width="stretch"=True)
+        st.dataframe(hasil[tampil_cols].drop_duplicates().head(50), width="stretch")
 
 
 def render_downstream_result():
@@ -1652,10 +1652,10 @@ def render_downstream_page():
         </div>
         """)
         st.markdown('<div class="down-btn">', unsafe_allow_html=True)
-        st.button("Tanaman", key="btn_ds_tanaman", on_click=ds_set_view, args=("deskriptif_tanaman",), width="stretch"=True)
-        st.button("Senyawa Bioaktif", key="btn_ds_senyawa", on_click=ds_set_view, args=("deskriptif_senyawa",), width="stretch"=True)
-        st.button("Khasiat", key="btn_ds_khasiat", on_click=ds_set_view, args=("deskriptif_khasiat",), width="stretch"=True)
-        st.button("Sumber Data", key="btn_ds_sumber", on_click=ds_set_view, args=("deskriptif_sumber",), width="stretch"=True)
+        st.button("Tanaman", key="btn_ds_tanaman", on_click=ds_set_view, args=("deskriptif_tanaman",), width="stretch")
+        st.button("Senyawa Bioaktif", key="btn_ds_senyawa", on_click=ds_set_view, args=("deskriptif_senyawa",), width="stretch")
+        st.button("Khasiat", key="btn_ds_khasiat", on_click=ds_set_view, args=("deskriptif_khasiat",), width="stretch")
+        st.button("Sumber Data", key="btn_ds_sumber", on_click=ds_set_view, args=("deskriptif_sumber",), width="stretch")
         st.markdown('</div>', unsafe_allow_html=True)
 
     with col2:
@@ -1666,10 +1666,10 @@ def render_downstream_page():
         </div>
         """)
         st.markdown('<div class="down-btn">', unsafe_allow_html=True)
-        st.button("Tanaman → Senyawa", key="btn_query_ts", on_click=ds_set_view, args=("query_tanaman_senyawa",), width="stretch"=True)
-        st.button("Senyawa → Khasiat", key="btn_query_sk", on_click=ds_set_view, args=("query_senyawa_khasiat",), width="stretch"=True)
-        st.button("Khasiat → Bukti Literatur", key="btn_query_kb", on_click=ds_set_view, args=("query_khasiat_bukti",), width="stretch"=True)
-        st.button("Output: Jalur Relasi", key="btn_query_jalur", on_click=ds_set_view, args=("query_jalur_relasi",), width="stretch"=True)
+        st.button("Tanaman → Senyawa", key="btn_query_ts", on_click=ds_set_view, args=("query_tanaman_senyawa",), width="stretch")
+        st.button("Senyawa → Khasiat", key="btn_query_sk", on_click=ds_set_view, args=("query_senyawa_khasiat",), width="stretch")
+        st.button("Khasiat → Bukti Literatur", key="btn_query_kb", on_click=ds_set_view, args=("query_khasiat_bukti",), width="stretch")
+        st.button("Output: Jalur Relasi", key="btn_query_jalur", on_click=ds_set_view, args=("query_jalur_relasi",), width="stretch")
         st.markdown('</div>', unsafe_allow_html=True)
 
     with col3:
@@ -1680,10 +1680,10 @@ def render_downstream_page():
         </div>
         """)
         st.markdown('<div class="down-btn">', unsafe_allow_html=True)
-        st.button("Kelor → 0,56", key="btn_sim_kelor", on_click=ds_set_view, args=("similarity_kelor",), width="stretch"=True)
-        st.button("Sirih → 0,41", key="btn_sim_sirih", on_click=ds_set_view, args=("similarity_sirih",), width="stretch"=True)
-        st.button("Jahe → 0,39", key="btn_sim_jahe", on_click=ds_set_view, args=("similarity_jahe",), width="stretch"=True)
-        st.button("Kayu Manis → 0,28", key="btn_sim_kayu", on_click=ds_set_view, args=("similarity_kayu_manis",), width="stretch"=True)
+        st.button("Kelor → 0,56", key="btn_sim_kelor", on_click=ds_set_view, args=("similarity_kelor",), width="stretch")
+        st.button("Sirih → 0,41", key="btn_sim_sirih", on_click=ds_set_view, args=("similarity_sirih",), width="stretch")
+        st.button("Jahe → 0,39", key="btn_sim_jahe", on_click=ds_set_view, args=("similarity_jahe",), width="stretch")
+        st.button("Kayu Manis → 0,28", key="btn_sim_kayu", on_click=ds_set_view, args=("similarity_kayu_manis",), width="stretch")
         st.markdown('</div>', unsafe_allow_html=True)
 
     with col4:
@@ -1694,10 +1694,10 @@ def render_downstream_page():
         </div>
         """)
         st.markdown('<div class="down-btn">', unsafe_allow_html=True)
-        st.button("Keluhan / Penyakit", key="btn_rec_keluhan", on_click=ds_set_view, args=("rekomendasi_keluhan",), width="stretch"=True)
-        st.button("Graph Search", key="btn_rec_graph", on_click=ds_set_view, args=("rekomendasi_graph",), width="stretch"=True)
-        st.button("Tanaman Terkait", key="btn_rec_tanaman", on_click=ds_set_view, args=("rekomendasi_tanaman",), width="stretch"=True)
-        st.button("Peringkat Rekomendasi", key="btn_rec_rank", on_click=ds_set_view, args=("rekomendasi_peringkat",), width="stretch"=True)
+        st.button("Keluhan / Penyakit", key="btn_rec_keluhan", on_click=ds_set_view, args=("rekomendasi_keluhan",), width="stretch")
+        st.button("Graph Search", key="btn_rec_graph", on_click=ds_set_view, args=("rekomendasi_graph",), width="stretch")
+        st.button("Tanaman Terkait", key="btn_rec_tanaman", on_click=ds_set_view, args=("rekomendasi_tanaman",), width="stretch")
+        st.button("Peringkat Rekomendasi", key="btn_rec_rank", on_click=ds_set_view, args=("rekomendasi_peringkat",), width="stretch")
         st.markdown('</div>', unsafe_allow_html=True)
 
     render_downstream_result()
@@ -1800,7 +1800,7 @@ elif menu == "📦 Aplikasi Downstream":
 elif menu == "📊 Statistik & Analitik":
     render_descriptive_chart()
     html_block('<div class="section-title">📋 Cuplikan Dataset</div>')
-    st.dataframe(df_data.head(30), width="stretch"=True)
+    st.dataframe(df_data.head(30), width="stretch")
 
 
 elif menu == "⚙️ Pengaturan":
