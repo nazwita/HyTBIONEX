@@ -1,7 +1,6 @@
 import os
 import re
 import html
-import tempfile
 from pathlib import Path
 
 import pandas as pd
@@ -40,6 +39,9 @@ if "last_image" not in st.session_state:
 
 if "last_status" not in st.session_state:
     st.session_state.last_status = {}
+
+if "downstream_view" not in st.session_state:
+    st.session_state.downstream_view = "awal"
 
 
 # =========================================================
@@ -113,7 +115,7 @@ def value_from_row(row, col):
     return str(value).strip()
 
 
-def path_exists(path):
+def file_exists(path):
     if path and os.path.exists(path):
         return path
     return None
@@ -124,18 +126,20 @@ def path_exists(path):
 # =========================================================
 @st.cache_data(show_spinner=False)
 def load_dataset():
-    if not os.path.exists(DATASET_FILE):
+    dataset_path = ""
+
+    if os.path.exists(DATASET_FILE):
+        dataset_path = DATASET_FILE
+    else:
         excel_files = [
             f for f in os.listdir(".")
             if f.lower().endswith((".xlsx", ".xls")) and f != IMAGE_TABLE_FILE
         ]
-
         if excel_files:
             dataset_path = excel_files[0]
-        else:
-            return pd.DataFrame(), "Dataset Excel utama belum ditemukan."
-    else:
-        dataset_path = DATASET_FILE
+
+    if not dataset_path:
+        return pd.DataFrame(), "Dataset Excel utama belum ditemukan."
 
     try:
         sheets = pd.read_excel(dataset_path, sheet_name=None)
@@ -160,10 +164,17 @@ def load_dataset():
 
 
 # =========================================================
-# LOAD DATA GAMBAR TANAMAN
+# LOAD TABEL GAMBAR RINGAN
 # =========================================================
 @st.cache_data(show_spinner=False)
 def load_image_mapping():
+    """
+    Membaca file Gambar tanaman herbal.xlsx secara ringan.
+    Tidak membaca gambar tertanam agar aplikasi tidak lama loading.
+    Kolom Gambar sebaiknya berisi teks:
+    assets/serai.jpg
+    assets/jahe.jpg
+    """
     mapping = {}
 
     if not os.path.exists(IMAGE_TABLE_FILE):
@@ -171,73 +182,37 @@ def load_image_mapping():
 
     try:
         sheets = pd.read_excel(IMAGE_TABLE_FILE, sheet_name=None)
-        image_df = pd.DataFrame()
 
+        image_df = pd.DataFrame()
         for _, df in sheets.items():
             if isinstance(df, pd.DataFrame) and not df.empty:
                 image_df = df.fillna("")
                 break
 
-        if not image_df.empty:
-            image_df.columns = [str(c).strip() for c in image_df.columns]
+        if image_df.empty:
+            return mapping
 
-            col_nama = find_col(image_df, ["Nama Tanaman", "Tanaman", "Nama"])
-            col_latin = find_col(image_df, ["Nama Latin", "Latin"])
-            col_gambar = find_col(image_df, ["Gambar", "Image", "Foto", "File Gambar", "Path Gambar"])
+        image_df.columns = [str(c).strip() for c in image_df.columns]
 
-            for _, row in image_df.iterrows():
-                nama = value_from_row(row, col_nama)
-                latin = value_from_row(row, col_latin)
-                gambar = value_from_row(row, col_gambar)
+        col_nama = find_col(image_df, ["Nama Tanaman", "Tanaman", "Nama"])
+        col_latin = find_col(image_df, ["Nama Latin", "Latin"])
+        col_gambar = find_col(image_df, ["Gambar", "Image", "Foto", "File Gambar", "Path Gambar"])
 
-                keys = []
+        for _, row in image_df.iterrows():
+            nama = value_from_row(row, col_nama)
+            latin = value_from_row(row, col_latin)
+            gambar = value_from_row(row, col_gambar)
 
-                if nama != "Belum terdeteksi":
-                    keys.append(clean_text(nama))
+            if gambar == "Belum terdeteksi":
+                gambar = ""
 
-                if latin != "Belum terdeteksi":
-                    keys.append(clean_text(latin))
-
-                for key in keys:
-                    if key:
-                        mapping[key] = {
-                            "nama": nama,
-                            "latin": latin,
-                            "gambar": "" if gambar == "Belum terdeteksi" else gambar,
-                            "embedded": ""
-                        }
-
-        # Ekstrak gambar tertanam dari Excel tambahan
-        try:
-            from openpyxl import load_workbook
-
-            wb = load_workbook(IMAGE_TABLE_FILE)
-            temp_dir = Path(tempfile.gettempdir()) / "hytbionex_embedded_images"
-            temp_dir.mkdir(parents=True, exist_ok=True)
-
-            embedded_paths = []
-
-            for ws in wb.worksheets:
-                images = getattr(ws, "_images", [])
-
-                for idx, img in enumerate(images):
-                    img_data = img._data()
-                    out_path = temp_dir / f"embedded_{ws.title}_{idx}.png"
-
-                    with open(out_path, "wb") as f:
-                        f.write(img_data)
-
-                    embedded_paths.append(str(out_path))
-
-            # Khusus kalau hanya ada 1 gambar tertanam dan ada baris Jahe,
-            # gambar otomatis dikaitkan ke Jahe.
-            if len(embedded_paths) == 1:
-                for key in list(mapping.keys()):
-                    if "jahe" in key or "zingiber" in key:
-                        mapping[key]["embedded"] = embedded_paths[0]
-
-        except Exception:
-            pass
+            for key in [clean_text(nama), clean_text(latin)]:
+                if key:
+                    mapping[key] = {
+                        "nama": nama,
+                        "latin": latin,
+                        "gambar": gambar
+                    }
 
     except Exception:
         pass
@@ -294,7 +269,7 @@ def read_uploaded_file(uploaded_file):
 
 
 # =========================================================
-# EKSTRAKSI / MATCHING DATASET
+# MATCHING DATASET
 # =========================================================
 def score_row(row, search_text, col_nama, col_latin, col_lokal):
     score = 0
@@ -306,7 +281,6 @@ def score_row(row, search_text, col_nama, col_latin, col_lokal):
     if nama and nama != "belum terdeteksi":
         if nama in search_text:
             score += 170
-
         for token in nama.split():
             if len(token) >= 3 and token in search_text:
                 score += 25
@@ -314,14 +288,12 @@ def score_row(row, search_text, col_nama, col_latin, col_lokal):
     if latin and latin != "belum terdeteksi":
         if latin in search_text:
             score += 150
-
         for token in latin.split():
             if len(token) >= 4 and token in search_text:
                 score += 20
 
     if lokal and lokal != "belum terdeteksi":
         parts = re.split(r"[,;/|]", lokal)
-
         for p in parts:
             p = clean_text(p)
             if p and len(p) >= 3 and p in search_text:
@@ -356,7 +328,6 @@ def find_best_match(df, search_text):
     if best_row is not None and best_score > 0:
         nama = value_from_row(best_row, col_nama)
         latin = value_from_row(best_row, col_latin)
-
         return best_row, f"Entitas cocok dengan dataset: {nama} / {latin} | Skor: {best_score}"
 
     return None, "Tidak ditemukan kecocokan entitas tanaman pada dataset."
@@ -405,6 +376,41 @@ def extract_result(row, input_text, df):
 # =========================================================
 # GAMBAR TANAMAN
 # =========================================================
+def scan_assets_by_name(nama, latin):
+    """
+    Mencari gambar otomatis berdasarkan nama tanaman atau nama latin di folder assets.
+    Contoh:
+    nama: Kayu Manis -> assets/kayu_manis.jpg
+    """
+    if not os.path.isdir(ASSET_DIR):
+        return None
+
+    keys = []
+    for item in [nama, latin]:
+        slug = slugify_filename(item)
+        if slug:
+            keys.append(slug)
+
+    image_exts = [".jpg", ".jpeg", ".png", ".webp"]
+
+    for file_name in os.listdir(ASSET_DIR):
+        file_path = os.path.join(ASSET_DIR, file_name)
+        if not os.path.isfile(file_path):
+            continue
+
+        stem = slugify_filename(Path(file_name).stem)
+        ext = Path(file_name).suffix.lower()
+
+        if ext not in image_exts:
+            continue
+
+        for key in keys:
+            if key == stem or key in stem or stem in key:
+                return file_path
+
+    return None
+
+
 def find_plant_image(result, image_mapping):
     gambar = result.get("Gambar", "")
     nama = result.get("Nama Tanaman", "")
@@ -412,7 +418,7 @@ def find_plant_image(result, image_mapping):
 
     candidates = []
 
-    # Dari kolom Gambar dataset utama
+    # 1. Dari kolom Gambar di dataset utama
     if gambar and gambar != "Belum terdeteksi":
         candidates.extend([
             gambar,
@@ -421,15 +427,10 @@ def find_plant_image(result, image_mapping):
             os.path.join("images", gambar),
         ])
 
-    # Dari file Gambar tanaman herbal.xlsx
-    map_keys = [clean_text(nama), clean_text(latin)]
-
-    for key in map_keys:
+    # 2. Dari file Gambar tanaman herbal.xlsx kalau kolom Gambar berisi path teks
+    for key in [clean_text(nama), clean_text(latin)]:
         if key in image_mapping:
-            map_item = image_mapping[key]
-
-            map_gambar = map_item.get("gambar", "")
-            map_embedded = map_item.get("embedded", "")
+            map_gambar = image_mapping[key].get("gambar", "")
 
             if map_gambar:
                 candidates.extend([
@@ -439,10 +440,7 @@ def find_plant_image(result, image_mapping):
                     os.path.join("images", map_gambar),
                 ])
 
-            if map_embedded:
-                candidates.append(map_embedded)
-
-    # Dari nama file otomatis
+    # 3. Dari nama file otomatis
     for item in [nama, latin]:
         slug = slugify_filename(item)
 
@@ -456,8 +454,13 @@ def find_plant_image(result, image_mapping):
                 ])
 
     for path in candidates:
-        if path_exists(path):
+        if file_exists(path):
             return path
+
+    # 4. Scan folder assets
+    found = scan_assets_by_name(nama, latin)
+    if found:
+        return found
 
     return None
 
@@ -484,17 +487,18 @@ def run_extraction(text_input, uploaded_file, df, dataset_status, image_mapping)
 # =========================================================
 # GRAFIK DESKRIPTIF DAN KG
 # =========================================================
-def make_descriptive_chart(df):
+def make_descriptive_chart(df, column=None, title="Analisis Deskriptif"):
     if df.empty:
         return None
 
-    col_nama = find_col(df, ["Nama Tanaman", "Nama_Tanaman", "Tanaman", "Nama"])
+    if column is None:
+        column = find_col(df, ["Nama Tanaman", "Nama_Tanaman", "Tanaman", "Nama"])
 
-    if col_nama is None:
+    if column is None:
         return None
 
     chart_df = (
-        df[col_nama]
+        df[column]
         .astype(str)
         .str.strip()
         .replace("", pd.NA)
@@ -504,17 +508,17 @@ def make_descriptive_chart(df):
         .reset_index()
     )
 
-    chart_df.columns = ["Nama Tanaman", "Jumlah Data"]
+    chart_df.columns = ["Kategori", "Jumlah Data"]
 
     fig = px.bar(
         chart_df,
         x="Jumlah Data",
-        y="Nama Tanaman",
+        y="Kategori",
         orientation="h",
         text="Jumlah Data",
         color="Jumlah Data",
         color_continuous_scale=["#bbf7d0", "#22c55e", "#047857"],
-        title="Analisis Deskriptif: 10 Tanaman dengan Data Terbanyak"
+        title=title
     )
 
     fig.update_layout(
@@ -523,7 +527,7 @@ def make_descriptive_chart(df):
         paper_bgcolor="white",
         title_font=dict(size=20, color="#064e3b"),
         xaxis_title="Jumlah Data",
-        yaxis_title="Nama Tanaman",
+        yaxis_title="Kategori",
         margin=dict(l=20, r=20, t=60, b=20),
     )
 
@@ -611,10 +615,8 @@ def make_kg_graph(result):
 
         if node["id"] in ["senyawa", "dosis"]:
             border_color = "#f97316"
-
         elif node["id"] in ["latin", "sumber"]:
             border_color = "#a855f7"
-
         elif node["id"] == "khasiat":
             border_color = "#ec4899"
 
@@ -660,7 +662,6 @@ html_block("""
     max-width: 1500px;
 }
 
-/* SIDEBAR */
 [data-testid="stSidebar"] {
     background:
         radial-gradient(circle at bottom left, rgba(34,197,94,0.25), transparent 28%),
@@ -744,7 +745,6 @@ html_block("""
     font-size: 12px !important;
 }
 
-/* HEADER */
 .top-header {
     background:
         linear-gradient(135deg, rgba(1,50,32,0.98), rgba(6,78,59,0.98), rgba(5,95,70,0.98));
@@ -805,13 +805,10 @@ html_block("""
     min-width: 145px;
 }
 
-/* DASHBOARD */
 .hero-banner {
     background:
         radial-gradient(circle at 70% 40%, rgba(187,247,208,0.92), transparent 28%),
         linear-gradient(135deg, #ffffff 0%, #ecfdf5 55%, #f8fafc 100%);
-    background-size: cover;
-    background-position: center;
     padding: 34px 32px;
     border-radius: 22px;
     min-height: 215px;
@@ -915,36 +912,43 @@ textarea {
     margin-bottom: 18px;
 }
 
-.downstream-card {
+.down-card {
     background: #ffffff;
     border-radius: 20px;
     padding: 18px;
     box-shadow: 0 10px 24px rgba(15,23,42,0.08);
     border: 1px solid rgba(6,78,59,0.12);
-    min-height: 360px;
+    min-height: 225px;
 }
 
-.downstream-card h4 {
+.down-card h3 {
     color: #064e3b;
+    text-align: center;
     font-weight: 900;
-    text-align: center;
+    font-size: 23px;
+    margin-bottom: 14px;
 }
 
-.downstream-card p {
+.down-card p {
     color: #334155;
-    font-size: 14px;
-    line-height: 1.5;
+    font-size: 15px;
+    line-height: 1.55;
+    min-height: 70px;
 }
 
-.flow-box {
-    background: #f0fdf4;
-    border: 1px solid #bbf7d0;
-    color: #064e3b;
-    border-radius: 12px;
-    padding: 8px;
-    text-align: center;
-    margin-bottom: 8px;
-    font-weight: 800;
+.down-btn button {
+    background: #f0fdf4 !important;
+    border: 1px solid #bbf7d0 !important;
+    color: #064e3b !important;
+    border-radius: 14px !important;
+    font-weight: 900 !important;
+    margin-bottom: 8px !important;
+    box-shadow: none !important;
+}
+
+.down-btn button:hover {
+    background: #dcfce7 !important;
+    color: #064e3b !important;
 }
 
 .footer-status {
@@ -966,17 +970,17 @@ textarea {
 df_data, dataset_status = load_dataset()
 image_mapping = load_image_mapping()
 
-col_senyawa = find_col(df_data, ["Zat Bioaktif", "Senyawa Bioaktif", "Senyawa", "Compound", "Kandungan"])
-col_khasiat = find_col(df_data, ["Khasiat", "Manfaat", "Benefit", "Khasiat/Efek Terapeutik", "Biological Activity"])
+col_senyawa_global = find_col(df_data, ["Zat Bioaktif", "Senyawa Bioaktif", "Senyawa", "Compound", "Kandungan"])
+col_khasiat_global = find_col(df_data, ["Khasiat", "Manfaat", "Benefit", "Khasiat/Efek Terapeutik", "Biological Activity"])
 
 total_data = len(df_data)
-total_senyawa = df_data[col_senyawa].astype(str).replace("", pd.NA).dropna().nunique() if col_senyawa else 0
-total_khasiat = df_data[col_khasiat].astype(str).replace("", pd.NA).dropna().nunique() if col_khasiat else 0
+total_senyawa = df_data[col_senyawa_global].astype(str).replace("", pd.NA).dropna().nunique() if col_senyawa_global else 0
+total_khasiat = df_data[col_khasiat_global].astype(str).replace("", pd.NA).dropna().nunique() if col_khasiat_global else 0
 total_relasi = total_data * 8 if total_data else 0
 
 
 # =========================================================
-# SIDEBAR CUSTOM
+# SIDEBAR
 # =========================================================
 def set_page(page_name):
     st.session_state.page = page_name
@@ -1029,7 +1033,7 @@ menu = st.session_state.page
 
 
 # =========================================================
-# HEADER ATAS
+# HEADER
 # =========================================================
 html_block("""
 <div class="top-header">
@@ -1051,28 +1055,27 @@ html_block("""
 
 
 # =========================================================
-# RENDER KOMPONEN
+# RENDER KOMPONEN UTAMA
 # =========================================================
 def render_summary_card():
-    with st.container():
-        st.subheader("RINGKASAN DATA")
+    st.subheader("RINGKASAN DATA")
 
-        m1, m2 = st.columns(2)
-        m3, m4 = st.columns(2)
+    m1, m2 = st.columns(2)
+    m3, m4 = st.columns(2)
 
-        with m1:
-            st.metric("🌿 Total Tanaman", f"{total_data:,}")
+    with m1:
+        st.metric("🌿 Total Tanaman", f"{total_data:,}")
 
-        with m2:
-            st.metric("🧪 Total Senyawa", f"{total_senyawa:,}")
+    with m2:
+        st.metric("🧪 Total Senyawa", f"{total_senyawa:,}")
 
-        with m3:
-            st.metric("💗 Total Khasiat", f"{total_khasiat:,}")
+    with m3:
+        st.metric("💗 Total Khasiat", f"{total_khasiat:,}")
 
-        with m4:
-            st.metric("🔗 Relasi Triplet", f"{total_relasi:,}")
+    with m4:
+        st.metric("🔗 Relasi Triplet", f"{total_relasi:,}")
 
-        st.caption("Dataset dan relasi dihitung otomatis dari file Excel.")
+    st.caption("Dataset dan relasi dihitung otomatis dari file Excel.")
 
 
 def render_input_area():
@@ -1088,7 +1091,7 @@ def render_input_area():
     with col1:
         text_input = st.text_area(
             "Input Data Tanaman",
-            placeholder="Contoh: Jahe, Kunyit, Sambiloto, Kayu Manis...",
+            placeholder="Contoh: Serai, Jahe, Kunyit, Sambiloto, Kayu Manis...",
             height=130,
             key="main_input_text"
         )
@@ -1165,11 +1168,11 @@ def render_image_section(result, image_path):
                 <h3>🌿 Gambar Tanaman Terkoneksi Dataset</h3>
                 <p><b>Nama Tanaman:</b> {safe_text(result["Nama Tanaman"])}</p>
                 <p><b>Nama Latin:</b> {safe_text(result["Nama Latin"])}</p>
-                <p><b>Catatan:</b> Gambar ditampilkan dari kolom <b>Gambar</b> pada dataset, folder <b>assets</b>, atau file <b>Gambar tanaman herbal.xlsx</b>.</p>
+                <p><b>Catatan:</b> Gambar tampil berdasarkan kolom <b>Gambar</b> di Excel atau nama file yang sesuai di folder <b>assets</b>.</p>
             </div>
             """)
     else:
-        st.info("Gambar belum ditemukan. Isi kolom Gambar di Excel, contoh: assets/jahe.jpg atau jahe.jpg.")
+        st.info("Gambar belum ditemukan. Pastikan folder assets berisi gambar, dan kolom Gambar di Excel berisi contoh: assets/serai.jpg atau serai.jpg.")
 
 
 def render_relation_table(result):
@@ -1197,7 +1200,10 @@ def render_kg_section(result):
 def render_descriptive_chart():
     html_block('<div class="section-title">📊 Grafik Analisis Deskriptif</div>')
 
-    fig = make_descriptive_chart(df_data)
+    fig = make_descriptive_chart(
+        df_data,
+        title="Analisis Deskriptif: 10 Tanaman dengan Data Terbanyak"
+    )
 
     if fig is None:
         st.info("Grafik belum dapat dibuat karena kolom nama tanaman tidak ditemukan.")
@@ -1243,6 +1249,391 @@ def render_preview_kg():
     st.plotly_chart(make_kg_graph(sample), use_container_width=True)
 
 
+# =========================================================
+# DOWNSTREAM AKTIF
+# =========================================================
+def ds_set_view(view_name):
+    st.session_state.downstream_view = view_name
+
+
+def ds_get_columns():
+    return {
+        "nama": find_col(df_data, ["Nama Tanaman", "Nama_Tanaman", "Tanaman", "Nama"]),
+        "latin": find_col(df_data, ["Nama Latin", "Nama_Latin", "Latin"]),
+        "senyawa": find_col(df_data, ["Zat Bioaktif", "Senyawa Bioaktif", "Senyawa_Bioaktif", "Compound", "Senyawa", "Kandungan", "Kandungan Kimia"]),
+        "khasiat": find_col(df_data, ["Khasiat", "Manfaat", "Benefit", "Khasiat/Efek Terapeutik", "Biological Activity", "Biological_Activity"]),
+        "bagian": find_col(df_data, ["Bagian Tanaman", "Bagian Digunakan", "Bagian_Digunakan", "Bagian"]),
+        "sumber": find_col(df_data, ["Sumber Data", "Sumber_Data", "Sumber", "Referensi"]),
+        "dosis": find_col(df_data, ["Komposisi/Dosis", "Dosis", "Komposisi"]),
+        "pengolahan": find_col(df_data, ["Cara Pengolahan", "Cara_Pengolahan", "Pengolahan", "Cara Pemakaian"]),
+    }
+
+
+def ds_plot_count(column_name, title):
+    if df_data.empty:
+        st.warning("Dataset belum terbaca.")
+        return
+
+    if column_name is None:
+        st.warning("Kolom yang dibutuhkan belum ditemukan pada dataset.")
+        return
+
+    fig = make_descriptive_chart(df_data, column=column_name, title=title)
+
+    if fig:
+        st.plotly_chart(fig, use_container_width=True)
+
+    temp = (
+        df_data[column_name]
+        .astype(str)
+        .str.strip()
+        .replace("", pd.NA)
+        .dropna()
+        .value_counts()
+        .head(30)
+        .reset_index()
+    )
+
+    temp.columns = ["Kategori", "Jumlah Data"]
+    st.dataframe(temp, use_container_width=True)
+
+
+def ds_relation_table(mode):
+    cols = ds_get_columns()
+
+    nama = cols["nama"]
+    senyawa = cols["senyawa"]
+    khasiat = cols["khasiat"]
+    sumber = cols["sumber"]
+    bagian = cols["bagian"]
+
+    if df_data.empty:
+        st.warning("Dataset belum terbaca.")
+        return
+
+    if mode == "tanaman_senyawa":
+        if nama is None or senyawa is None:
+            st.warning("Kolom Nama Tanaman atau Senyawa Bioaktif belum ditemukan.")
+            return
+
+        rel_df = df_data[[nama, senyawa]].copy()
+        rel_df.columns = ["Entitas Sumber", "Entitas Tujuan"]
+        rel_df["Relasi"] = "mengandung senyawa bioaktif"
+        rel_df = rel_df[["Entitas Sumber", "Relasi", "Entitas Tujuan"]]
+
+    elif mode == "senyawa_khasiat":
+        if senyawa is None or khasiat is None:
+            st.warning("Kolom Senyawa Bioaktif atau Khasiat belum ditemukan.")
+            return
+
+        rel_df = df_data[[senyawa, khasiat]].copy()
+        rel_df.columns = ["Entitas Sumber", "Entitas Tujuan"]
+        rel_df["Relasi"] = "mendukung khasiat"
+        rel_df = rel_df[["Entitas Sumber", "Relasi", "Entitas Tujuan"]]
+
+    elif mode == "khasiat_bukti":
+        if khasiat is None:
+            st.warning("Kolom Khasiat belum ditemukan.")
+            return
+
+        if sumber:
+            rel_df = df_data[[khasiat, sumber]].copy()
+            rel_df.columns = ["Khasiat", "Bukti / Sumber Data"]
+        else:
+            rel_df = df_data[[khasiat]].copy()
+            rel_df.columns = ["Khasiat"]
+            rel_df["Bukti / Sumber Data"] = "Dataset herbal"
+
+        rel_df["Relasi"] = "didukung oleh bukti"
+        rel_df = rel_df[["Khasiat", "Relasi", "Bukti / Sumber Data"]]
+
+    else:
+        needed = [c for c in [nama, bagian, senyawa, khasiat, sumber] if c is not None]
+
+        if not needed:
+            st.warning("Kolom relasi belum ditemukan pada dataset.")
+            return
+
+        rel_df = df_data[needed].copy()
+
+        rename_map = {}
+        if nama:
+            rename_map[nama] = "Tanaman"
+        if bagian:
+            rename_map[bagian] = "Bagian Digunakan"
+        if senyawa:
+            rename_map[senyawa] = "Senyawa Bioaktif"
+        if khasiat:
+            rename_map[khasiat] = "Khasiat"
+        if sumber:
+            rename_map[sumber] = "Sumber Data"
+
+        rel_df = rel_df.rename(columns=rename_map)
+
+    rel_df = rel_df.fillna("")
+    rel_df = rel_df.drop_duplicates().head(50)
+    st.dataframe(rel_df, use_container_width=True)
+
+
+def ds_tokenize(text):
+    text = clean_text(text)
+    return set([t for t in text.split() if len(t) >= 3])
+
+
+def ds_similarity_analysis(target_name):
+    cols = ds_get_columns()
+
+    nama = cols["nama"]
+    senyawa = cols["senyawa"]
+    khasiat = cols["khasiat"]
+    bagian = cols["bagian"]
+
+    if df_data.empty:
+        st.warning("Dataset belum terbaca.")
+        return
+
+    if nama is None:
+        st.warning("Kolom Nama Tanaman belum ditemukan.")
+        return
+
+    feature_cols = [c for c in [senyawa, khasiat, bagian] if c is not None]
+
+    if not feature_cols:
+        st.warning("Kolom fitur kemiripan belum ditemukan.")
+        return
+
+    target_clean = clean_text(target_name)
+    target_row = None
+
+    for _, row in df_data.iterrows():
+        nama_row = clean_text(row.get(nama, ""))
+        if target_clean in nama_row or nama_row in target_clean:
+            target_row = row
+            break
+
+    if target_row is None:
+        st.warning(f"Tanaman {target_name} belum ditemukan pada dataset.")
+        return
+
+    base_text = " ".join([str(target_row.get(c, "")) for c in feature_cols])
+    base_tokens = ds_tokenize(base_text)
+
+    scores = []
+
+    for _, row in df_data.iterrows():
+        nama_row = str(row.get(nama, "")).strip()
+
+        if clean_text(nama_row) == clean_text(target_name):
+            continue
+
+        row_text = " ".join([str(row.get(c, "")) for c in feature_cols])
+        row_tokens = ds_tokenize(row_text)
+
+        if not base_tokens or not row_tokens:
+            score = 0
+        else:
+            score = len(base_tokens.intersection(row_tokens)) / len(base_tokens.union(row_tokens))
+
+        if score > 0:
+            scores.append({
+                "Tanaman Referensi": target_name,
+                "Tanaman Mirip": nama_row,
+                "Skor Kemiripan": round(score, 3)
+            })
+
+    result_df = pd.DataFrame(scores)
+
+    if result_df.empty:
+        st.info("Belum ditemukan tanaman yang mirip berdasarkan fitur dataset.")
+        return
+
+    result_df = result_df.sort_values("Skor Kemiripan", ascending=False).head(10)
+
+    st.dataframe(result_df, use_container_width=True)
+
+    fig = px.bar(
+        result_df,
+        x="Skor Kemiripan",
+        y="Tanaman Mirip",
+        orientation="h",
+        text="Skor Kemiripan",
+        color="Skor Kemiripan",
+        color_continuous_scale=["#bbf7d0", "#22c55e", "#047857"],
+        title=f"Analisis Kemiripan Tanaman terhadap {target_name}"
+    )
+
+    fig.update_layout(
+        height=430,
+        plot_bgcolor="white",
+        paper_bgcolor="white",
+        yaxis=dict(autorange="reversed"),
+        margin=dict(l=20, r=20, t=60, b=20)
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
+
+
+def ds_recommendation(mode):
+    cols = ds_get_columns()
+
+    nama = cols["nama"]
+    senyawa = cols["senyawa"]
+    khasiat = cols["khasiat"]
+    sumber = cols["sumber"]
+
+    if df_data.empty:
+        st.warning("Dataset belum terbaca.")
+        return
+
+    if nama is None:
+        st.warning("Kolom Nama Tanaman belum ditemukan.")
+        return
+
+    if mode == "peringkat":
+        if khasiat:
+            rank_df = (
+                df_data.groupby(nama)[khasiat]
+                .count()
+                .reset_index()
+                .rename(columns={nama: "Tanaman", khasiat: "Skor Rekomendasi"})
+                .sort_values("Skor Rekomendasi", ascending=False)
+                .head(10)
+            )
+        else:
+            rank_df = df_data[nama].value_counts().head(10).reset_index()
+            rank_df.columns = ["Tanaman", "Skor Rekomendasi"]
+
+        st.dataframe(rank_df, use_container_width=True)
+
+        fig = px.bar(
+            rank_df,
+            x="Skor Rekomendasi",
+            y="Tanaman",
+            orientation="h",
+            text="Skor Rekomendasi",
+            color="Skor Rekomendasi",
+            color_continuous_scale=["#bbf7d0", "#22c55e", "#047857"],
+            title="Peringkat Rekomendasi Tanaman Herbal"
+        )
+
+        fig.update_layout(
+            height=430,
+            plot_bgcolor="white",
+            paper_bgcolor="white",
+            yaxis=dict(autorange="reversed")
+        )
+
+        st.plotly_chart(fig, use_container_width=True)
+        return
+
+    if mode == "graph_search":
+        st.info("Graph Search menelusuri hubungan Tanaman → Senyawa → Khasiat → Sumber Data.")
+        ds_relation_table("jalur_relasi")
+        return
+
+    keyword = st.text_input(
+        "Masukkan keluhan / penyakit / khasiat yang dicari",
+        placeholder="Contoh: batuk, demam, diabetes, antiinflamasi"
+    )
+
+    search_cols = [c for c in [nama, senyawa, khasiat, sumber] if c is not None]
+
+    if not keyword:
+        st.info("Masukkan kata kunci untuk mencari rekomendasi herbal.")
+        return
+
+    temp = df_data.copy()
+    mask = pd.Series(False, index=temp.index)
+
+    for c in search_cols:
+        mask = mask | temp[c].astype(str).str.lower().str.contains(keyword.lower(), na=False)
+
+    hasil = temp[mask]
+    tampil_cols = [c for c in [nama, senyawa, khasiat, sumber] if c is not None]
+
+    if hasil.empty:
+        st.info("Belum ditemukan rekomendasi berdasarkan kata kunci tersebut.")
+    else:
+        st.success(f"Ditemukan {len(hasil)} kandidat tanaman herbal.")
+        st.dataframe(hasil[tampil_cols].drop_duplicates().head(50), use_container_width=True)
+
+
+def render_downstream_result():
+    view = st.session_state.downstream_view
+
+    st.markdown("---")
+
+    if view == "awal":
+        st.info("Klik salah satu tombol downstream untuk menampilkan hasil analisis.")
+        return
+
+    cols = ds_get_columns()
+
+    if view == "deskriptif_tanaman":
+        st.subheader("📊 Analisis Deskriptif: Tanaman")
+        ds_plot_count(cols["nama"], "Distribusi Data Berdasarkan Nama Tanaman")
+
+    elif view == "deskriptif_senyawa":
+        st.subheader("🧪 Analisis Deskriptif: Senyawa Bioaktif")
+        ds_plot_count(cols["senyawa"], "Distribusi Data Berdasarkan Senyawa Bioaktif")
+
+    elif view == "deskriptif_khasiat":
+        st.subheader("💚 Analisis Deskriptif: Khasiat")
+        ds_plot_count(cols["khasiat"], "Distribusi Data Berdasarkan Khasiat")
+
+    elif view == "deskriptif_sumber":
+        st.subheader("📚 Analisis Deskriptif: Sumber Data")
+        ds_plot_count(cols["sumber"], "Distribusi Data Berdasarkan Sumber Data")
+
+    elif view == "query_tanaman_senyawa":
+        st.subheader("🔎 Query Graf: Tanaman → Senyawa")
+        ds_relation_table("tanaman_senyawa")
+
+    elif view == "query_senyawa_khasiat":
+        st.subheader("🔎 Query Graf: Senyawa → Khasiat")
+        ds_relation_table("senyawa_khasiat")
+
+    elif view == "query_khasiat_bukti":
+        st.subheader("🔎 Query Graf: Khasiat → Bukti Literatur")
+        ds_relation_table("khasiat_bukti")
+
+    elif view == "query_jalur_relasi":
+        st.subheader("🔎 Output: Jalur Relasi")
+        ds_relation_table("jalur_relasi")
+
+    elif view == "similarity_kelor":
+        st.subheader("🧬 Analisis Kemiripan: Kelor")
+        ds_similarity_analysis("Kelor")
+
+    elif view == "similarity_sirih":
+        st.subheader("🧬 Analisis Kemiripan: Sirih")
+        ds_similarity_analysis("Sirih")
+
+    elif view == "similarity_jahe":
+        st.subheader("🧬 Analisis Kemiripan: Jahe")
+        ds_similarity_analysis("Jahe")
+
+    elif view == "similarity_kayu_manis":
+        st.subheader("🧬 Analisis Kemiripan: Kayu Manis")
+        ds_similarity_analysis("Kayu Manis")
+
+    elif view == "rekomendasi_keluhan":
+        st.subheader("💊 Rekomendasi Herbal Berdasarkan Keluhan / Penyakit")
+        ds_recommendation("keluhan")
+
+    elif view == "rekomendasi_graph":
+        st.subheader("💊 Rekomendasi Herbal: Graph Search")
+        ds_recommendation("graph_search")
+
+    elif view == "rekomendasi_tanaman":
+        st.subheader("💊 Tanaman Herbal Terkait")
+        ds_recommendation("tanaman_terkait")
+
+    elif view == "rekomendasi_peringkat":
+        st.subheader("💊 Peringkat Rekomendasi Herbal")
+        ds_recommendation("peringkat")
+
+
 def render_downstream_page():
     html_block('<div class="section-title">📦 Aplikasi Downstream</div>')
 
@@ -1251,57 +1642,87 @@ def render_downstream_page():
         "untuk analisis deskriptif, query graf berbasis bukti, analisis kemiripan, dan rekomendasi herbal."
     )
 
-    d1, d2, d3, d4 = st.columns(4)
+    col1, col2, col3, col4 = st.columns(4)
 
-    with d1:
+    with col1:
         html_block("""
-        <div class="downstream-card">
-            <h4>1. Analisis Deskriptif</h4>
+        <div class="down-card">
+            <h3>1. Analisis Deskriptif</h3>
             <p>Menampilkan ringkasan statistik entitas, relasi, dan distribusi data herbal.</p>
-            <div class="flow-box">Tanaman</div>
-            <div class="flow-box">Senyawa Bioaktif</div>
-            <div class="flow-box">Khasiat</div>
-            <div class="flow-box">Sumber Data</div>
         </div>
         """)
+        st.markdown('<div class="down-btn">', unsafe_allow_html=True)
+        st.button("Tanaman", key="btn_ds_tanaman", on_click=ds_set_view, args=("deskriptif_tanaman",), use_container_width=True)
+        st.button("Senyawa Bioaktif", key="btn_ds_senyawa", on_click=ds_set_view, args=("deskriptif_senyawa",), use_container_width=True)
+        st.button("Khasiat", key="btn_ds_khasiat", on_click=ds_set_view, args=("deskriptif_khasiat",), use_container_width=True)
+        st.button("Sumber Data", key="btn_ds_sumber", on_click=ds_set_view, args=("deskriptif_sumber",), use_container_width=True)
+        st.markdown('</div>', unsafe_allow_html=True)
 
-    with d2:
+    with col2:
         html_block("""
-        <div class="downstream-card">
-            <h4>2. Query Graf Berbasis Bukti</h4>
+        <div class="down-card">
+            <h3>2. Query Graf Berbasis Bukti</h3>
             <p>Menelusuri hubungan tanaman, senyawa, khasiat, dan sumber literatur.</p>
-            <div class="flow-box">Tanaman → Senyawa</div>
-            <div class="flow-box">Senyawa → Khasiat</div>
-            <div class="flow-box">Khasiat → Bukti Literatur</div>
-            <div class="flow-box">Output: Jalur Relasi</div>
         </div>
         """)
+        st.markdown('<div class="down-btn">', unsafe_allow_html=True)
+        st.button("Tanaman → Senyawa", key="btn_query_ts", on_click=ds_set_view, args=("query_tanaman_senyawa",), use_container_width=True)
+        st.button("Senyawa → Khasiat", key="btn_query_sk", on_click=ds_set_view, args=("query_senyawa_khasiat",), use_container_width=True)
+        st.button("Khasiat → Bukti Literatur", key="btn_query_kb", on_click=ds_set_view, args=("query_khasiat_bukti",), use_container_width=True)
+        st.button("Output: Jalur Relasi", key="btn_query_jalur", on_click=ds_set_view, args=("query_jalur_relasi",), use_container_width=True)
+        st.markdown('</div>', unsafe_allow_html=True)
 
-    with d3:
+    with col3:
         html_block("""
-        <div class="downstream-card">
-            <h4>3. Analisis Kemiripan</h4>
+        <div class="down-card">
+            <h3>3. Analisis Kemiripan</h3>
             <p>Menemukan tanaman yang mirip berdasarkan senyawa dan khasiat.</p>
-            <div class="flow-box">Kelor → 0,56</div>
-            <div class="flow-box">Sirih → 0,41</div>
-            <div class="flow-box">Jahe → 0,39</div>
-            <div class="flow-box">Kayu Manis → 0,28</div>
         </div>
         """)
+        st.markdown('<div class="down-btn">', unsafe_allow_html=True)
+        st.button("Kelor → 0,56", key="btn_sim_kelor", on_click=ds_set_view, args=("similarity_kelor",), use_container_width=True)
+        st.button("Sirih → 0,41", key="btn_sim_sirih", on_click=ds_set_view, args=("similarity_sirih",), use_container_width=True)
+        st.button("Jahe → 0,39", key="btn_sim_jahe", on_click=ds_set_view, args=("similarity_jahe",), use_container_width=True)
+        st.button("Kayu Manis → 0,28", key="btn_sim_kayu", on_click=ds_set_view, args=("similarity_kayu_manis",), use_container_width=True)
+        st.markdown('</div>', unsafe_allow_html=True)
 
-    with d4:
+    with col4:
         html_block("""
-        <div class="downstream-card">
-            <h4>4. Rekomendasi Herbal</h4>
+        <div class="down-card">
+            <h3>4. Rekomendasi Herbal</h3>
             <p>Memberikan rekomendasi tanaman herbal berbasis khasiat dan relasi graf.</p>
-            <div class="flow-box">Keluhan / Penyakit</div>
-            <div class="flow-box">Graph Search</div>
-            <div class="flow-box">Tanaman Terkait</div>
-            <div class="flow-box">Peringkat Rekomendasi</div>
         </div>
         """)
+        st.markdown('<div class="down-btn">', unsafe_allow_html=True)
+        st.button("Keluhan / Penyakit", key="btn_rec_keluhan", on_click=ds_set_view, args=("rekomendasi_keluhan",), use_container_width=True)
+        st.button("Graph Search", key="btn_rec_graph", on_click=ds_set_view, args=("rekomendasi_graph",), use_container_width=True)
+        st.button("Tanaman Terkait", key="btn_rec_tanaman", on_click=ds_set_view, args=("rekomendasi_tanaman",), use_container_width=True)
+        st.button("Peringkat Rekomendasi", key="btn_rec_rank", on_click=ds_set_view, args=("rekomendasi_peringkat",), use_container_width=True)
+        st.markdown('</div>', unsafe_allow_html=True)
 
-    render_descriptive_chart()
+    render_downstream_result()
+
+
+def render_downstream_preview():
+    html_block("""
+    <div class="section-title">📦 Aplikasi Downstream</div>
+    <div class="result-card">
+        <h4>1. Analisis Deskriptif</h4>
+        <p>Ringkasan statistik tanaman, senyawa, khasiat, dan sumber data.</p>
+    </div>
+    <div class="result-card">
+        <h4>2. Query Graf Berbasis Bukti</h4>
+        <p>Menelusuri hubungan tanaman, senyawa, khasiat, dan literatur.</p>
+    </div>
+    <div class="result-card">
+        <h4>3. Analisis Kemiripan</h4>
+        <p>Membandingkan tanaman berdasarkan senyawa dan khasiat.</p>
+    </div>
+    <div class="result-card">
+        <h4>4. Rekomendasi Herbal</h4>
+        <p>Rekomendasi tanaman herbal berdasarkan khasiat dan relasi graf.</p>
+    </div>
+    """)
 
 
 # =========================================================
@@ -1329,7 +1750,7 @@ if menu == "🏠 Dashboard":
     down_left, down_right = st.columns([2, 1])
 
     with down_left:
-        render_downstream_page()
+        render_downstream_preview()
 
     with down_right:
         render_preview_kg()
