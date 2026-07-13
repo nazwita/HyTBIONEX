@@ -431,36 +431,82 @@ def short_label(text, max_len=24):
         return text
     return text[:max_len] + "..."
 
-
 def make_kg_graph(result):
+    # =====================================================
+    # LABEL NODE
+    # =====================================================
     tanaman = short_label(result["Nama Tanaman"], 18)
     latin = short_label(result["Nama Latin"], 24)
     bagian = short_label(result["Bagian Tanaman"], 18)
-    senyawa = short_label(result["Zat Bioaktif"], 24)
-    khasiat = short_label(result["Khasiat/Efek Terapeutik"], 22)
-    pengolahan = short_label(result["Cara Pengolahan"], 22)
-    dosis = short_label(result["Komposisi/Dosis"], 22)
+    pengolahan = short_label(result["Cara Pengolahan"], 24)
+    dosis = short_label(result["Komposisi/Dosis"], 24)
     sumber = short_label(result["Sumber Data"], 26)
 
+    # =====================================================
+    # NODE KNOWLEDGE GRAPH
+    # Node senyawa dan khasiat sudah dihilangkan
+    # =====================================================
     nodes = [
-        {"id": "tanaman", "label": tanaman, "x": 0, "y": 0, "color": "#047857", "size": 76},
-        {"id": "latin", "label": latin, "x": -2.4, "y": 1.45, "color": "#e9d5ff", "size": 58},
-        {"id": "bagian", "label": bagian, "x": 2.4, "y": 1.45, "color": "#bbf7d0", "size": 58},
-        {"id": "senyawa", "label": senyawa, "x": -2.5, "y": -0.05, "color": "#fed7aa", "size": 62},
-        {"id": "khasiat", "label": khasiat, "x": 0, "y": -1.65, "color": "#fbcfe8", "size": 62},
-        {"id": "pengolahan", "label": pengolahan, "x": 2.55, "y": -0.1, "color": "#bbf7d0", "size": 58},
-        {"id": "dosis", "label": dosis, "x": -2.2, "y": -1.75, "color": "#fed7aa", "size": 58},
-        {"id": "sumber", "label": sumber, "x": 2.2, "y": -1.75, "color": "#e9d5ff", "size": 58},
+        {
+            "id": "tanaman",
+            "label": tanaman,
+            "x": 0,
+            "y": 0,
+            "color": "#047857",
+            "size": 76
+        },
+        {
+            "id": "latin",
+            "label": latin,
+            "x": -2.4,
+            "y": 1.45,
+            "color": "#e9d5ff",
+            "size": 58
+        },
+        {
+            "id": "bagian",
+            "label": bagian,
+            "x": 2.4,
+            "y": 1.45,
+            "color": "#bbf7d0",
+            "size": 58
+        },
+        {
+            "id": "pengolahan",
+            "label": pengolahan,
+            "x": 2.55,
+            "y": -0.20,
+            "color": "#bbf7d0",
+            "size": 58
+        },
+        {
+            "id": "dosis",
+            "label": dosis,
+            "x": -2.2,
+            "y": -1.65,
+            "color": "#fed7aa",
+            "size": 58
+        },
+        {
+            "id": "sumber",
+            "label": sumber,
+            "x": 2.2,
+            "y": -1.65,
+            "color": "#e9d5ff",
+            "size": 58
+        },
     ]
 
-    node_map = {n["id"]: n for n in nodes}
+    node_map = {node["id"]: node for node in nodes}
 
+    # =====================================================
+    # RELASI
+    # Relasi "mengandung", "memiliki khasiat",
+    # dan "mendukung khasiat" sudah dihilangkan
+    # =====================================================
     edges = [
         ("tanaman", "latin", "nama latin"),
         ("tanaman", "bagian", "bagian digunakan"),
-        ("tanaman", "senyawa", "mengandung"),
-        ("senyawa", "khasiat", "mendukung khasiat"),
-        ("tanaman", "khasiat", "memiliki khasiat"),
         ("tanaman", "pengolahan", "cara pengolahan"),
         ("tanaman", "dosis", "dosis/komposisi"),
         ("tanaman", "sumber", "sumber data"),
@@ -468,69 +514,108 @@ def make_kg_graph(result):
 
     fig = go.Figure()
 
-    for source, target, label in edges:
-        a = node_map[source]
-        b = node_map[target]
+    # =====================================================
+    # MEMBUAT GARIS DAN LABEL RELASI
+    # =====================================================
+    for source, target, relation_label in edges:
+        source_node = node_map[source]
+        target_node = node_map[target]
 
-        fig.add_trace(go.Scatter(
-            x=[a["x"], b["x"]],
-            y=[a["y"], b["y"]],
-            mode="lines",
-            line=dict(color="#94a3b8", width=2.2),
-            hoverinfo="none",
-            showlegend=False
-        ))
+        # Garis penghubung
+        fig.add_trace(
+            go.Scatter(
+                x=[source_node["x"], target_node["x"]],
+                y=[source_node["y"], target_node["y"]],
+                mode="lines",
+                line=dict(
+                    color="#94a3b8",
+                    width=2.2
+                ),
+                hoverinfo="none",
+                showlegend=False
+            )
+        )
 
+        # Tulisan relasi di tengah garis
         fig.add_annotation(
-            x=(a["x"] + b["x"]) / 2,
-            y=(a["y"] + b["y"]) / 2,
-            text=label,
+            x=(source_node["x"] + target_node["x"]) / 2,
+            y=(source_node["y"] + target_node["y"]) / 2,
+            text=relation_label,
             showarrow=False,
-            font=dict(size=12, color="#111111"),
-            bgcolor="rgba(255,255,255,0.82)",
-            bordercolor="rgba(226,232,240,0.9)",
+            font=dict(
+                size=12,
+                color="#111111"
+            ),
+            bgcolor="rgba(255,255,255,0.88)",
+            bordercolor="rgba(226,232,240,0.95)",
             borderwidth=1,
             borderpad=3
         )
 
+    # =====================================================
+    # MEMBUAT NODE
+    # =====================================================
     for node in nodes:
         border_color = "#047857"
 
-        if node["id"] in ["senyawa", "dosis"]:
+        if node["id"] == "dosis":
             border_color = "#f97316"
         elif node["id"] in ["latin", "sumber"]:
             border_color = "#a855f7"
-        elif node["id"] == "khasiat":
-            border_color = "#ec4899"
 
-        fig.add_trace(go.Scatter(
-            x=[node["x"]],
-            y=[node["y"]],
-            mode="markers+text",
-            marker=dict(
-                size=node["size"],
-                color=node["color"],
-                line=dict(color=border_color, width=4)
-            ),
-            text=[node["label"]],
-            textposition="middle center",
-            textfont=dict(size=14, color="#111111", family="Arial Black"),
-            hoverinfo="text",
-            showlegend=False
-        ))
+        fig.add_trace(
+            go.Scatter(
+                x=[node["x"]],
+                y=[node["y"]],
+                mode="markers+text",
+                marker=dict(
+                    size=node["size"],
+                    color=node["color"],
+                    line=dict(
+                        color=border_color,
+                        width=4
+                    )
+                ),
+                text=[node["label"]],
+                textposition="middle center",
+                textfont=dict(
+                    size=14,
+                    color="#111111",
+                    family="Arial Black"
+                ),
+                hovertext=[node["label"]],
+                hoverinfo="text",
+                showlegend=False
+            )
+        )
 
+    # =====================================================
+    # TAMPILAN GRAFIK
+    # =====================================================
     fig.update_layout(
-        height=620,
+        height=600,
         plot_bgcolor="#fbf7ff",
         paper_bgcolor="#fbf7ff",
-        margin=dict(l=10, r=10, t=20, b=20),
-        xaxis=dict(visible=False, range=[-3.2, 3.2]),
-        yaxis=dict(visible=False, range=[-2.4, 2.2]),
+        margin=dict(
+            l=20,
+            r=20,
+            t=20,
+            b=20
+        ),
+        xaxis=dict(
+            visible=False,
+            range=[-3.2, 3.2],
+            fixedrange=True
+        ),
+        yaxis=dict(
+            visible=False,
+            range=[-2.3, 2.2],
+            fixedrange=True
+        ),
+        dragmode=False
     )
 
     return fig
-
-
 # =========================================================
 # CSS
 # =========================================================
