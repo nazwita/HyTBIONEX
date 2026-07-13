@@ -792,24 +792,7 @@ def make_kg_graph(result):
 
     return fig
     return fig
-    def render_kg_section(result):
-    st.markdown(
-        '<div class="section-title">'
-        '🕸️ HerbKG 2.0 Explorer'
-        '</div>',
-        unsafe_allow_html=True
-    )
-
-    fig_kg = make_kg_graph(result)
-
-    st.plotly_chart(
-        fig_kg,
-        use_container_width=True,
-        config={
-            "displayModeBar": False,
-            "scrollZoom": False
-        }
-    )
+  
 # =========================================================
 # CSS
 # =========================================================
