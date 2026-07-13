@@ -432,85 +432,236 @@ def short_label(text, max_len=24):
     return text[:max_len] + "..."
 
 def make_kg_graph(result):
-    # =====================================================
-    # LABEL NODE
-    # =====================================================
-    tanaman = short_label(result["Nama Tanaman"], 18)
-    latin = short_label(result["Nama Latin"], 24)
-    bagian = short_label(result["Bagian Tanaman"], 18)
-    pengolahan = short_label(result["Cara Pengolahan"], 24)
-    dosis = short_label(result["Komposisi/Dosis"], 24)
-    sumber = short_label(result["Sumber Data"], 26)
+    """
+    Membuat Knowledge Graph tanaman herbal dengan entitas:
+    1. Nama Tanaman
+    2. Nama Latin
+    3. Nama Lokal/Daerah
+    4. Bagian Tanaman
+    5. Zat Bioaktif
+    6. Khasiat/Efek Terapeutik
+    7. Cara Pengolahan
+    8. Komposisi/Dosis
+    9. Sumber Data
+    """
 
     # =====================================================
-    # NODE KNOWLEDGE GRAPH
-    # Node senyawa dan khasiat sudah dihilangkan
+    # MENGAMBIL DATA HASIL EKSTRAKSI
+    # =====================================================
+    tanaman = short_label(
+        result.get("Nama Tanaman", "Belum terdeteksi"),
+        18
+    )
+
+    latin = short_label(
+        result.get("Nama Latin", "Belum terdeteksi"),
+        24
+    )
+
+    lokal = short_label(
+        result.get("Nama Lokal/Daerah", "Belum terdeteksi"),
+        22
+    )
+
+    bagian = short_label(
+        result.get("Bagian Tanaman", "Belum terdeteksi"),
+        20
+    )
+
+    senyawa = short_label(
+        result.get("Zat Bioaktif", "Belum terdeteksi"),
+        28
+    )
+
+    khasiat = short_label(
+        result.get("Khasiat/Efek Terapeutik", "Belum terdeteksi"),
+        26
+    )
+
+    pengolahan = short_label(
+        result.get("Cara Pengolahan", "Belum terdeteksi"),
+        26
+    )
+
+    dosis = short_label(
+        result.get("Komposisi/Dosis", "Belum terdeteksi"),
+        24
+    )
+
+    sumber = short_label(
+        result.get("Sumber Data", "Belum terdeteksi"),
+        27
+    )
+
+    # =====================================================
+    # POSISI NODE KNOWLEDGE GRAPH
     # =====================================================
     nodes = [
         {
             "id": "tanaman",
             "label": tanaman,
+            "full_text": result.get("Nama Tanaman", ""),
             "x": 0,
             "y": 0,
             "color": "#047857",
-            "size": 76
+            "border": "#065f46",
+            "size": 88
         },
+
         {
             "id": "latin",
             "label": latin,
-            "x": -2.4,
-            "y": 1.45,
+            "full_text": result.get("Nama Latin", ""),
+            "x": -2.8,
+            "y": 1.55,
             "color": "#e9d5ff",
-            "size": 58
+            "border": "#9333ea",
+            "size": 66
         },
+
+        {
+            "id": "lokal",
+            "label": lokal,
+            "full_text": result.get("Nama Lokal/Daerah", ""),
+            "x": 0,
+            "y": 2.15,
+            "color": "#bfdbfe",
+            "border": "#2563eb",
+            "size": 66
+        },
+
         {
             "id": "bagian",
             "label": bagian,
-            "x": 2.4,
-            "y": 1.45,
+            "full_text": result.get("Bagian Tanaman", ""),
+            "x": 2.8,
+            "y": 1.55,
             "color": "#bbf7d0",
-            "size": 58
+            "border": "#047857",
+            "size": 66
         },
+
+        {
+            "id": "senyawa",
+            "label": senyawa,
+            "full_text": result.get("Zat Bioaktif", ""),
+            "x": -3.15,
+            "y": 0,
+            "color": "#fed7aa",
+            "border": "#f97316",
+            "size": 72
+        },
+
         {
             "id": "pengolahan",
             "label": pengolahan,
-            "x": 2.55,
-            "y": -0.20,
+            "full_text": result.get("Cara Pengolahan", ""),
+            "x": 3.15,
+            "y": 0,
             "color": "#bbf7d0",
-            "size": 58
+            "border": "#047857",
+            "size": 70
         },
+
         {
             "id": "dosis",
             "label": dosis,
-            "x": -2.2,
-            "y": -1.65,
-            "color": "#fed7aa",
-            "size": 58
+            "full_text": result.get("Komposisi/Dosis", ""),
+            "x": -2.45,
+            "y": -1.75,
+            "color": "#fde68a",
+            "border": "#d97706",
+            "size": 68
         },
+
+        {
+            "id": "khasiat",
+            "label": khasiat,
+            "full_text": result.get(
+                "Khasiat/Efek Terapeutik",
+                ""
+            ),
+            "x": 0,
+            "y": -2.2,
+            "color": "#fbcfe8",
+            "border": "#ec4899",
+            "size": 74
+        },
+
         {
             "id": "sumber",
             "label": sumber,
-            "x": 2.2,
-            "y": -1.65,
+            "full_text": result.get("Sumber Data", ""),
+            "x": 2.45,
+            "y": -1.75,
             "color": "#e9d5ff",
-            "size": 58
+            "border": "#9333ea",
+            "size": 68
         },
     ]
 
-    node_map = {node["id"]: node for node in nodes}
+    node_map = {
+        node["id"]: node
+        for node in nodes
+    }
 
     # =====================================================
-    # RELASI
-    # Relasi "mengandung", "memiliki khasiat",
-    # dan "mendukung khasiat" sudah dihilangkan
+    # RELASI ANTARENTITAS
     # =====================================================
     edges = [
-        ("tanaman", "latin", "nama latin"),
-        ("tanaman", "bagian", "bagian digunakan"),
-        ("tanaman", "pengolahan", "cara pengolahan"),
-        ("tanaman", "dosis", "dosis/komposisi"),
-        ("tanaman", "sumber", "sumber data"),
+        (
+            "tanaman",
+            "latin",
+            "nama latin"
+        ),
+        (
+            "tanaman",
+            "lokal",
+            "nama lokal/daerah"
+        ),
+        (
+            "tanaman",
+            "bagian",
+            "bagian digunakan"
+        ),
+        (
+            "tanaman",
+            "senyawa",
+            "mengandung"
+        ),
+        (
+            "tanaman",
+            "pengolahan",
+            "cara pengolahan"
+        ),
+        (
+            "tanaman",
+            "dosis",
+            "dosis/komposisi"
+        ),
+        (
+            "tanaman",
+            "khasiat",
+            "memiliki khasiat"
+        ),
+        (
+            "tanaman",
+            "sumber",
+            "sumber data"
+        ),
     ]
+
+    # Pergeseran tulisan relasi agar tidak bertumpuk
+    label_shift = {
+        "nama latin": (0, 12),
+        "nama lokal/daerah": (45, 0),
+        "bagian digunakan": (0, 12),
+        "mengandung": (0, 14),
+        "cara pengolahan": (0, 14),
+        "dosis/komposisi": (-5, -2),
+        "memiliki khasiat": (50, 0),
+        "sumber data": (5, -2),
+    }
 
     fig = go.Figure()
 
@@ -524,44 +675,62 @@ def make_kg_graph(result):
         # Garis penghubung
         fig.add_trace(
             go.Scatter(
-                x=[source_node["x"], target_node["x"]],
-                y=[source_node["y"], target_node["y"]],
+                x=[
+                    source_node["x"],
+                    target_node["x"]
+                ],
+                y=[
+                    source_node["y"],
+                    target_node["y"]
+                ],
                 mode="lines",
                 line=dict(
                     color="#94a3b8",
-                    width=2.2
+                    width=2.5
                 ),
                 hoverinfo="none",
                 showlegend=False
             )
         )
 
-        # Tulisan relasi di tengah garis
+        x_shift, y_shift = label_shift.get(
+            relation_label,
+            (0, 0)
+        )
+
+        # Label relasi
         fig.add_annotation(
-            x=(source_node["x"] + target_node["x"]) / 2,
-            y=(source_node["y"] + target_node["y"]) / 2,
+            x=(
+                source_node["x"]
+                + target_node["x"]
+            ) / 2,
+            y=(
+                source_node["y"]
+                + target_node["y"]
+            ) / 2,
             text=relation_label,
             showarrow=False,
+            xshift=x_shift,
+            yshift=y_shift,
             font=dict(
                 size=12,
-                color="#111111"
+                color="#111827",
+                family="Arial"
             ),
-            bgcolor="rgba(255,255,255,0.88)",
-            bordercolor="rgba(226,232,240,0.95)",
+            bgcolor="rgba(255,255,255,0.92)",
+            bordercolor="#dbe3ec",
             borderwidth=1,
-            borderpad=3
+            borderpad=4
         )
 
     # =====================================================
     # MEMBUAT NODE
     # =====================================================
     for node in nodes:
-        border_color = "#047857"
-
-        if node["id"] == "dosis":
-            border_color = "#f97316"
-        elif node["id"] in ["latin", "sumber"]:
-            border_color = "#a855f7"
+        hover_text = (
+            f"<b>{node['label']}</b>"
+            f"<br>{node['full_text']}"
+        )
 
         fig.add_trace(
             go.Scatter(
@@ -572,49 +741,56 @@ def make_kg_graph(result):
                     size=node["size"],
                     color=node["color"],
                     line=dict(
-                        color=border_color,
+                        color=node["border"],
                         width=4
                     )
                 ),
                 text=[node["label"]],
                 textposition="middle center",
                 textfont=dict(
-                    size=14,
+                    size=13,
                     color="#111111",
                     family="Arial Black"
                 ),
-                hovertext=[node["label"]],
+                hovertext=[hover_text],
                 hoverinfo="text",
-                showlegend=False
+                showlegend=False,
+                cliponaxis=False
             )
         )
 
     # =====================================================
-    # TAMPILAN GRAFIK
+    # TAMPILAN KNOWLEDGE GRAPH
     # =====================================================
     fig.update_layout(
-        height=600,
+        height=720,
         plot_bgcolor="#fbf7ff",
         paper_bgcolor="#fbf7ff",
         margin=dict(
             l=20,
             r=20,
-            t=20,
-            b=20
+            t=30,
+            b=30
         ),
         xaxis=dict(
             visible=False,
-            range=[-3.2, 3.2],
+            range=[-4.1, 4.1],
             fixedrange=True
         ),
         yaxis=dict(
             visible=False,
-            range=[-2.3, 2.2],
+            range=[-2.9, 2.8],
             fixedrange=True
         ),
-        dragmode=False
+        dragmode=False,
+        hoverlabel=dict(
+            bgcolor="white",
+            font_size=13,
+            font_family="Arial"
+        )
     )
 
+    return fig
     return fig
 # =========================================================
 # CSS
