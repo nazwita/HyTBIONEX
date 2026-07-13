@@ -1297,7 +1297,7 @@ st.markdown("""
     </div>
     <div>
         <h2>Analisis Bioaktif & HerbKG 2.0</h2>
-        <p>Bioactive Information Isolation & Enhanced Herb Knowledge Graph</p>
+        <p>Bioactive Information EXTRACTION & Enhanced Herb Knowledge Graph</p>
     </div>
     <div class="top-user">
         <div class="top-pill">🟢 Model Status<br>Aktif</div>
