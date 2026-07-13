@@ -1390,7 +1390,7 @@ def render_single_input_area():
             key="main_uploaded_file"
         )
 
-    submit = st.button("🔍 Proses Analisis", use_container_width=True, key="btn_process_all")
+    submit = st.button("🔍 PROSES EKTRAKSI", use_container_width=True, key="btn_process_all")
 
     if submit:
         if not text_input and uploaded_file is None:
@@ -1409,7 +1409,7 @@ def render_single_input_area():
 
 
 def render_quick_access():
-    st.markdown('<div class="graph-box"><h3 style="color:#064e3b;">AKSES CEPAT ANALISIS</h3>', unsafe_allow_html=True)
+    st.markdown('<div class="graph-box"><h3 style="color:#064e3b;">AKSES CEPAT EKSTRAKSI</h3>', unsafe_allow_html=True)
 
     q1, q2, q3, q4 = st.columns(4)
 
@@ -1657,8 +1657,8 @@ if menu == "🏠 Dashboard":
         <div class="hero-banner">
             <h2>Selamat datang di HyTBIONEX</h2>
             <p>
-            Platform cerdas untuk isolasi informasi bioaktif dari tanaman herbal Indonesia
-            menggunakan pendekatan Hybrid Transformer serta integrasi HerbKG 2.0.
+            Platform Cerdas Ekstraksi Informasi Zat Bioaktif Tanaman Herbal Indonesia
+            menggunakan Model  Hybrid Transformer serta Integrasi HerbKG 2.0.
             </p>
         </div>
         """, unsafe_allow_html=True)
@@ -1688,7 +1688,7 @@ elif menu in ["🌿 Input Tanaman", "📁 Upload Dokumen"]:
     render_single_input_area()
 
 
-elif menu == "📋 Hasil Isolasi Entitas":
+elif menu == "📋 Hasil Ekstraksi  Entitas":
     if st.session_state.last_result:
         render_result_cards(st.session_state.last_result)
         render_image_section(st.session_state.last_result, st.session_state.last_image)
