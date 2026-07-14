@@ -1297,7 +1297,7 @@ st.markdown("""
     </div>
     <div>
         <h2>Analisis Bioaktif & HerbKG 2.0</h2>
-        <p>Bioactive Information EXTRACTION & Enhanced Herb Knowledge Graph</p>
+        <p>Bioactive Information Extraction & Enhanced Herb Knowledge Graph</p>
     </div>
     <div class="top-user">
         <div class="top-pill">🟢 Model Status<br>Aktif</div>
@@ -1378,7 +1378,7 @@ def render_single_input_area():
     with col1:
         text_input = st.text_area(
             "Input Data Tanaman",
-            placeholder="Contoh: Jahe, Kunyit, Sambiloto, Kayu Manis...",
+            placeholder=" Masukan kata/kalimat yang terkait dengan Tanaman  Herbal Indonesia, Contoh /: jahe, Cengkeh...",
             height=130,
             key="main_input_text"
         )
@@ -1417,7 +1417,7 @@ def render_quick_access():
         st.markdown("""
         <div class="quick-card">
             <div style="font-size:45px;">📖</div>
-            <h4>Hasil Isolasi Entitas</h4>
+            <h4>Hasil Ekstraksi Entitas</h4>
             <p>Lihat entitas yang telah diidentifikasi</p>
             <div class="quick-btn">Lihat Data →</div>
         </div>
