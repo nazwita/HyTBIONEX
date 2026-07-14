@@ -1326,8 +1326,7 @@ total_relasi = total_data * 8 if total_data else 0
 # RENDER KOMPONEN
 # =========================================================
 def render_summary_card():
-    st.markdown(f"""
-    <div class="summary-card">
+    st.markdown(f"""<div class="summary-card">
         <h3 style="color:#064e3b;margin-bottom:25px;">RINGKASAN DATA</h3>
 
         <div class="summary-item">
