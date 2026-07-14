@@ -1,5 +1,6 @@
-streamlit
-pandas
-openpyxl
-pypdf
-plotly
+streamlit>=1.42.0
+pandas>=2.2.0
+plotly>=5.24.0
+openpyxl>=3.1.5
+xlrd>=2.0.1
+pypdf>=5.0.0
