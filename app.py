@@ -2425,7 +2425,7 @@ def render_result_cards(result):
 
     cards = [
         (
-            "🧪 SENYAWA BIOAKTIF,
+            "🧪 SENYAWA BIOAKTIF",
             result.get("Zat Bioaktif", "Tidak terdeteksi"),
             True,
         ),
