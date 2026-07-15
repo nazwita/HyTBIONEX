@@ -207,64 +207,651 @@ def load_dataset(dataset_path):
         return pd.DataFrame(), f"Gagal membaca dataset: {error}"
 
 
-def read_uploaded_file(uploaded_file):
-    if uploaded_file is None:
-        return "", "Tidak ada dokumen yang diunggah."
 
-    filename = uploaded_file.name.lower()
+def _normalise_document_text(text):
+    """Meratakan spasi tanpa menghilangkan batas baris penting."""
+    text = str(text or "").replace("\x00", " ")
+    text = re.sub(r"[ \t]+", " ", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
+
+
+def _unique_preserve_order(values):
+    seen = set()
+    output = []
+
+    for value in values:
+        value = re.sub(r"\s+", " ", str(value or "")).strip(" ,;:.|-\n\t")
+        key = value.casefold()
+
+        if not value or key in seen:
+            continue
+
+        seen.add(key)
+        output.append(value)
+
+    return output
+
+
+def _first_nonempty(value, fallback="Tidak disebutkan dalam dokumen"):
+    value = re.sub(r"\s+", " ", str(value or "")).strip()
+    return value if value else fallback
+
+
+def _extract_doi(text):
+    match = re.search(
+        r"\b10\.\d{4,9}/[-._;()/:A-Za-z0-9]+",
+        str(text or ""),
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        return ""
+    return match.group(0).rstrip(".,;)")
+
+
+def _extract_year(text):
+    years = re.findall(r"\b(?:19|20)\d{2}\b", str(text or "")[:8000])
+    if not years:
+        return ""
+
+    current_reasonable = [year for year in years if 1900 <= int(year) <= 2100]
+    return current_reasonable[0] if current_reasonable else ""
+
+
+def _detect_article_title(text):
+    lines = [
+        re.sub(r"\s+", " ", line).strip()
+        for line in str(text or "").splitlines()
+        if re.sub(r"\s+", " ", line).strip()
+    ]
+
+    blocked = {
+        "abstract", "abstrak", "introduction", "pendahuluan", "keywords",
+        "kata kunci", "journal", "jurnal", "volume", "issue", "issn",
+        "doi", "received", "accepted", "published", "department",
+        "faculty", "university", "universitas", "corresponding author",
+    }
+
+    candidates = []
+
+    for index, line in enumerate(lines[:30]):
+        lower = line.casefold()
+
+        if any(token in lower for token in blocked):
+            continue
+        if "@" in line or re.search(r"https?://|www\.", line, re.IGNORECASE):
+            continue
+        if len(line) < 18 or len(line) > 260:
+            continue
+        if len(line.split()) < 4:
+            continue
+        if re.fullmatch(r"[\d\W_]+", line):
+            continue
+
+        score = min(len(line), 160)
+        score += max(0, 18 - index)
+
+        if line.endswith("."):
+            score -= 15
+        if line.count(",") >= 4:
+            score -= 15
+
+        candidates.append((score, line))
+
+    return max(candidates, default=(0, ""))[1]
+
+
+def _looks_like_author_line(line):
+    line = re.sub(r"\s+", " ", str(line or "")).strip()
+    lower = line.casefold()
+
+    blocked = (
+        "abstract", "abstrak", "department", "faculty", "university",
+        "universitas", "institute", "institut", "laboratory", "journal",
+        "jurnal", "volume", "issue", "doi", "received", "accepted",
+        "corresponding", "email", "keywords", "kata kunci",
+    )
+
+    if not line or any(token in lower for token in blocked):
+        return False
+    if "@" in line or len(line) > 220 or len(line) < 4:
+        return False
+    if re.search(r"\b(?:19|20)\d{2}\b", line):
+        return False
+
+    cleaned = re.sub(r"[\d*†‡§#]+", "", line)
+    name_tokens = re.findall(r"\b[A-ZÀ-ÖØ-Þ][A-Za-zÀ-ÖØ-öø-ÿ'’-]+\b", cleaned)
+    separators = bool(re.search(r",|\band\b|\bdan\b|&", cleaned, re.IGNORECASE))
+
+    return len(name_tokens) >= 2 and (separators or len(name_tokens) <= 8)
+
+
+def _detect_article_authors(text, title=""):
+    lines = [
+        re.sub(r"\s+", " ", line).strip()
+        for line in str(text or "").splitlines()
+        if re.sub(r"\s+", " ", line).strip()
+    ]
+
+    for line in lines[:50]:
+        match = re.search(
+            r"^(?:authors?|penulis)\s*[:\-]\s*(.+)$",
+            line,
+            flags=re.IGNORECASE,
+        )
+        if match:
+            return re.sub(r"[\d*†‡§#]+", "", match.group(1)).strip(" ,;")
+
+    title_index = -1
+    if title:
+        title_key = clean_text(title)
+        for index, line in enumerate(lines[:30]):
+            if clean_text(line) == title_key:
+                title_index = index
+                break
+
+    search_start = title_index + 1 if title_index >= 0 else 0
+
+    for line in lines[search_start:search_start + 12]:
+        if _looks_like_author_line(line):
+            return re.sub(r"[\d*†‡§#]+", "", line).strip(" ,;")
+
+    for index, line in enumerate(lines[:60]):
+        if "@" in line and index > 0:
+            for previous in reversed(lines[max(0, index - 3):index]):
+                if _looks_like_author_line(previous):
+                    return re.sub(r"[\d*†‡§#]+", "", previous).strip(" ,;")
+
+    return ""
+
+
+def read_uploaded_document(uploaded_file):
+    """
+    Membaca artikel secara langsung dan mengambil metadata bibliografi.
+    Fungsi ini tidak menggunakan dataset Excel.
+    """
+    if uploaded_file is None:
+        return {}, "Tidak ada dokumen yang diunggah."
+
+    filename = uploaded_file.name
+    filename_lower = filename.lower()
+    document = {
+        "filename": filename,
+        "text": "",
+        "title": "",
+        "authors": "",
+        "year": "",
+        "doi": "",
+        "pages": 0,
+        "format": Path(filename).suffix.lower().replace(".", "").upper(),
+    }
 
     try:
-        if filename.endswith(".pdf"):
+        uploaded_file.seek(0)
+
+        if filename_lower.endswith(".pdf"):
             from pypdf import PdfReader
 
             reader = PdfReader(uploaded_file)
-            text = " ".join((page.extract_text() or "") for page in reader.pages)
+            page_texts = [(page.extract_text() or "") for page in reader.pages]
+            document["text"] = _normalise_document_text("\n\n".join(page_texts))
+            document["pages"] = len(reader.pages)
 
-            if not text.strip():
-                return (
-                    "",
-                    f"PDF {uploaded_file.name} terbaca, tetapi teks kosong. "
-                    "Kemungkinan PDF berupa hasil scan/gambar.",
-                )
+            metadata = reader.metadata or {}
+            document["title"] = str(getattr(metadata, "title", "") or "").strip()
+            document["authors"] = str(getattr(metadata, "author", "") or "").strip()
 
-            return text, (
-                f"PDF terbaca: {uploaded_file.name} | "
-                f"{len(reader.pages)} halaman | {len(text):,} karakter"
+            creation_date = getattr(metadata, "creation_date", None)
+            if creation_date is not None:
+                document["year"] = str(getattr(creation_date, "year", "") or "")
+
+        elif filename_lower.endswith(".docx"):
+            from docx import Document
+
+            word_document = Document(uploaded_file)
+            document["text"] = _normalise_document_text(
+                "\n".join(paragraph.text for paragraph in word_document.paragraphs)
+            )
+            properties = word_document.core_properties
+            document["title"] = str(properties.title or "").strip()
+            document["authors"] = str(properties.author or "").strip()
+            if properties.created:
+                document["year"] = str(properties.created.year)
+
+        elif filename_lower.endswith(".txt"):
+            raw = uploaded_file.read()
+            document["text"] = _normalise_document_text(
+                raw.decode("utf-8", errors="ignore")
             )
 
-        if filename.endswith(".txt"):
-            text = uploaded_file.read().decode("utf-8", errors="ignore")
-            return text, (
-                f"TXT terbaca: {uploaded_file.name} | {len(text):,} karakter"
-            )
-
-        if filename.endswith(".csv"):
+        elif filename_lower.endswith(".csv"):
             frame = pd.read_csv(uploaded_file).fillna("")
-            text = " ".join(frame.astype(str).values.flatten())
-            return text, (
-                f"CSV terbaca: {uploaded_file.name} | {len(frame):,} baris"
+            document["text"] = _normalise_document_text(
+                "\n".join(" | ".join(map(str, row)) for row in frame.values)
             )
 
-        if filename.endswith((".xlsx", ".xls")):
+        elif filename_lower.endswith((".xlsx", ".xls")):
             sheets = pd.read_excel(uploaded_file, sheet_name=None)
             text_parts = []
-            total_rows = 0
-
-            for frame in sheets.values():
+            for sheet_name, frame in sheets.items():
                 frame = frame.fillna("")
-                total_rows += len(frame)
-                text_parts.extend(frame.astype(str).values.flatten())
+                text_parts.append(f"SHEET: {sheet_name}")
+                text_parts.extend(" | ".join(map(str, row)) for row in frame.values)
+            document["text"] = _normalise_document_text("\n".join(text_parts))
 
-            text = " ".join(map(str, text_parts))
-            return text, (
-                f"Excel terbaca: {uploaded_file.name} | "
-                f"{len(sheets):,} sheet | {total_rows:,} baris"
+        else:
+            return {}, "Format dokumen belum didukung."
+
+        if not document["text"]:
+            return (
+                document,
+                f"Dokumen {filename} terbaca, tetapi teks tidak ditemukan. "
+                "PDF kemungkinan berupa scan/gambar dan membutuhkan OCR.",
             )
 
-        return "", "Format dokumen belum didukung."
+        document["doi"] = _extract_doi(document["text"])
+
+        if not document["title"]:
+            document["title"] = _detect_article_title(document["text"])
+        if not document["authors"]:
+            document["authors"] = _detect_article_authors(
+                document["text"],
+                document["title"],
+            )
+        if not document["year"]:
+            document["year"] = _extract_year(document["text"])
+
+        status_parts = [
+            f"{document['format']} terbaca: {filename}",
+            f"{len(document['text']):,} karakter",
+        ]
+        if document["pages"]:
+            status_parts.append(f"{document['pages']} halaman")
+        if document["authors"]:
+            status_parts.append(f"penulis: {document['authors']}")
+
+        return document, " | ".join(status_parts)
 
     except Exception as error:
-        return "", f"Gagal membaca dokumen: {error}"
+        return {}, f"Gagal membaca dokumen: {error}"
+
+
+def _sentences(text):
+    text = _normalise_document_text(text)
+    parts = re.split(r"(?<=[.!?])\s+|\n+", text)
+    return [re.sub(r"\s+", " ", part).strip() for part in parts if part.strip()]
+
+
+def _capture_label_value(text, labels, max_length=220):
+    label_pattern = "|".join(re.escape(label) for label in labels)
+    patterns = [
+        rf"(?:{label_pattern})\s*[:\-]\s*([^\n.;]{{2,{max_length}}})",
+        rf"(?:{label_pattern})\s+(?:adalah|yaitu|berupa|meliputi|include(?:s)?|are|is)\s+([^\n.;]{{2,{max_length}}})",
+    ]
+
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if match:
+            return match.group(1).strip(" ,;:")
+
+    return ""
+
+
+def _extract_latin_name(text):
+    labelled = _capture_label_value(
+        text,
+        ["nama latin", "nama ilmiah", "scientific name", "botanical name"],
+        max_length=100,
+    )
+    if labelled:
+        match = re.search(
+            r"\b([A-Z][a-z]{2,}\s+[a-z][a-z-]{2,}(?:\s+(?:subsp\.|var\.)\s+[a-z-]+)?)\b",
+            labelled,
+        )
+        if match:
+            return match.group(1)
+
+    pattern = re.compile(
+        r"\b([A-Z][a-z]{2,}\s+[a-z][a-z-]{2,}(?:\s+(?:subsp\.|var\.)\s+[a-z-]+)?)\b"
+    )
+    blocked_first = {
+        "The", "This", "Table", "Figure", "Results", "Discussion",
+        "Introduction", "Abstract", "Indonesia", "Journal", "Article",
+        "Keywords", "Department", "University", "Faculty", "Volume",
+        "Received", "Accepted", "Background", "Methods", "Conclusion",
+        "Research", "Data", "Study", "Based", "According", "Medicinal",
+    }
+
+    candidates = [
+        candidate
+        for candidate in pattern.findall(text)
+        if candidate.split()[0] not in blocked_first
+    ]
+
+    if not candidates:
+        return ""
+
+    counts = Counter(candidate.casefold() for candidate in candidates)
+    display = {}
+    for candidate in candidates:
+        display.setdefault(candidate.casefold(), candidate)
+
+    best_key = counts.most_common(1)[0][0]
+    return display[best_key]
+
+
+def _extract_plant_and_local_names(text, latin_name):
+    plant_name = _capture_label_value(
+        text,
+        ["nama tanaman", "nama umum", "common name", "plant name"],
+        max_length=90,
+    )
+    local_name = _capture_label_value(
+        text,
+        [
+            "nama lokal/daerah", "nama lokal", "nama daerah", "local name",
+            "vernacular name", "locally known as", "dikenal sebagai",
+            "disebut sebagai",
+        ],
+        max_length=100,
+    )
+
+    if latin_name:
+        escaped_latin = re.escape(latin_name)
+
+        if not plant_name:
+            before = re.search(
+                rf"\b([A-ZÀ-ÖØ-öø-ÿ][A-Za-zÀ-ÖØ-öø-ÿ'’ -]{{2,50}})\s*\(\s*{escaped_latin}\s*\)",
+                text,
+            )
+            after = re.search(
+                rf"{escaped_latin}\s*\(\s*([A-ZÀ-ÖØ-öø-ÿ][A-Za-zÀ-ÖØ-öø-ÿ'’ -]{{2,50}})\s*\)",
+                text,
+            )
+            match = before or after
+            if match:
+                plant_name = match.group(1).strip()
+
+        if not local_name:
+            local_match = re.search(
+                rf"{escaped_latin}.{{0,120}}?(?:locally known as|local name|nama lokal|nama daerah|dikenal sebagai|disebut)\s*[:\-]?\s*([A-Za-zÀ-ÖØ-öø-ÿ'’ -]{{2,60}})",
+                text,
+                flags=re.IGNORECASE | re.DOTALL,
+            )
+            if local_match:
+                local_name = local_match.group(1).strip(" ,;.")
+
+    if plant_name:
+        plant_name = re.split(r"[,;|]", plant_name)[0].strip()
+    if local_name:
+        local_name = re.split(r"[;|]", local_name)[0].strip()
+
+    if not local_name and plant_name:
+        local_name = plant_name
+
+    return plant_name, local_name
+
+
+def _extract_plant_parts(text):
+    labelled = _capture_label_value(
+        text,
+        [
+            "bagian tanaman", "bagian yang digunakan", "bagian digunakan",
+            "plant part", "part used", "parts used",
+        ],
+        max_length=140,
+    )
+
+    part_map = {
+        "daun": ["daun", "leaf", "leaves"],
+        "akar": ["akar", "root", "roots"],
+        "batang": ["batang", "stem", "stems"],
+        "kulit batang": ["kulit batang", "bark"],
+        "rimpang": ["rimpang", "rhizome", "rhizomes"],
+        "umbi": ["umbi", "tuber", "tubers", "bulb", "bulbs"],
+        "buah": ["buah", "fruit", "fruits"],
+        "biji": ["biji", "seed", "seeds"],
+        "bunga": ["bunga", "flower", "flowers"],
+        "herba": ["herba", "whole plant", "aerial parts"],
+        "getah": ["getah", "latex", "sap"],
+    }
+
+    search_text = f"{labelled} {text}" if labelled else text
+    found = []
+
+    for canonical, variants in part_map.items():
+        for variant in variants:
+            if re.search(rf"\b{re.escape(variant)}\b", search_text, re.IGNORECASE):
+                found.append(canonical.title())
+                break
+
+    return ", ".join(_unique_preserve_order(found)[:6])
+
+
+def _clean_compound_candidate(candidate):
+    candidate = re.sub(
+        r"^(?:the|a|an|its|their|senyawa|senyawa bioaktif|bioactive compounds?|phytochemicals?|kandungan kimia)\s+",
+        "",
+        str(candidate or ""),
+        flags=re.IGNORECASE,
+    )
+    candidate = re.sub(r"\([^)]*\)", "", candidate)
+    candidate = re.sub(r"\s+", " ", candidate).strip(" ,;:.|-\n\t")
+
+    blocked = (
+        "activity", "aktivitas", "effect", "efek", "extract", "ekstrak",
+        "sample", "sampel", "method", "metode", "result", "hasil",
+        "plant", "tanaman", "leaf", "leaves", "daun",
+    )
+
+    if not candidate or len(candidate) > 80 or len(candidate.split()) > 7:
+        return ""
+    if any(word in candidate.casefold() for word in blocked):
+        return ""
+    if not re.search(r"[A-Za-zÀ-ÖØ-öø-ÿ]", candidate):
+        return ""
+
+    return candidate
+
+
+def _extract_bioactive_compounds(text):
+    compounds = []
+    cue_patterns = [
+        r"(?:mengandung|kandungan kimia|senyawa bioaktif|senyawa aktif|fitokimia)\s*(?:adalah|yaitu|berupa|meliputi|:)?\s*([^.;\n]{3,260})",
+        r"(?:contains?|bioactive compounds?|active compounds?|phytochemicals?|chemical constituents?)\s*(?:include(?:s)?|are|is|such as|:)?\s*([^.;\n]{3,260})",
+    ]
+
+    for pattern in cue_patterns:
+        for match in re.finditer(pattern, text, flags=re.IGNORECASE):
+            segment = match.group(1)
+            segment = re.split(
+                r"\b(?:which|that|yang|with|dengan|showed|menunjukkan|possess|memiliki)\b",
+                segment,
+                maxsplit=1,
+                flags=re.IGNORECASE,
+            )[0]
+
+            for item in re.split(r",|;|\band\b|\bdan\b", segment, flags=re.IGNORECASE):
+                cleaned = _clean_compound_candidate(item)
+                if cleaned:
+                    compounds.append(cleaned)
+
+    known_compounds = [
+        "flavonoid", "alkaloid", "saponin", "tannin", "tanin", "terpenoid",
+        "steroid", "phenolic", "fenolik", "polyphenol", "polifenol",
+        "quercetin", "kaempferol", "curcumin", "gingerol", "shogaol",
+        "eugenol", "citronellal", "citronellol", "geraniol", "limonene",
+        "linalool", "menthol", "thymol", "carvacrol", "cinnamaldehyde",
+        "cinnamic acid", "gallic acid", "caffeic acid", "chlorogenic acid",
+        "ferulic acid", "ellagic acid", "catechin", "epicatechin",
+        "rutin", "apigenin", "luteolin", "naringenin", "hesperidin",
+        "anthocyanin", "antosianin", "beta carotene", "β-carotene",
+        "ascorbic acid", "vitamin c", "oleanolic acid", "ursolic acid",
+        "andrographolide", "asiaticoside", "madecassoside", "allicin",
+        "piperine", "capsaicin", "mangiferin", "xanthone", "acetogenin",
+        "glycoside", "glikosida", "essential oil", "minyak atsiri",
+    ]
+
+    for compound in known_compounds:
+        if re.search(rf"(?<!\w){re.escape(compound)}(?!\w)", text, re.IGNORECASE):
+            compounds.append(compound)
+
+    return ", ".join(_unique_preserve_order(compounds)[:15])
+
+
+def _extract_biological_activities(text):
+    activity_map = {
+        "Antioksidan": ["antioksidan", "antioxidant"],
+        "Antimikroba": ["antimikroba", "antimicrobial"],
+        "Antibakteri": ["antibakteri", "antibacterial"],
+        "Antijamur": ["antijamur", "antifungal"],
+        "Antiinflamasi": ["antiinflamasi", "anti-inflammatory", "anti inflammatory"],
+        "Antidiabetes": ["antidiabetes", "antidiabetic", "hypoglycemic"],
+        "Antihipertensi": ["antihipertensi", "antihypertensive"],
+        "Analgesik": ["analgesik", "analgesic"],
+        "Antipiretik": ["antipiretik", "antipyretic"],
+        "Antikanker": ["antikanker", "anticancer", "cytotoxic"],
+        "Hepatoprotektif": ["hepatoprotektif", "hepatoprotective"],
+        "Imunomodulator": ["imunomodulator", "immunomodulatory"],
+        "Diuretik": ["diuretik", "diuretic"],
+        "Antivirus": ["antivirus", "antiviral"],
+        "Gastroprotektif": ["gastroprotektif", "gastroprotective"],
+        "Penyembuhan Luka": ["penyembuhan luka", "wound healing"],
+    }
+
+    found = []
+    for canonical, variants in activity_map.items():
+        if any(
+            re.search(rf"(?<!\w){re.escape(variant)}(?!\w)", text, re.IGNORECASE)
+            for variant in variants
+        ):
+            found.append(canonical)
+
+    labelled = _capture_label_value(
+        text,
+        [
+            "aktivitas biologis", "efek terapeutik", "khasiat", "manfaat",
+            "biological activity", "therapeutic effect", "pharmacological activity",
+        ],
+        max_length=220,
+    )
+    if labelled:
+        for item in re.split(r",|;|\band\b|\bdan\b", labelled, flags=re.IGNORECASE):
+            item = re.sub(r"\s+", " ", item).strip(" ,;:.")
+            if 2 <= len(item) <= 70:
+                found.append(item)
+
+    return ", ".join(_unique_preserve_order(found)[:12])
+
+
+def _extract_preparation(text):
+    keywords = [
+        "direbus", "rebus", "diseduh", "seduh", "ditumbuk", "tumbuk",
+        "digiling", "dikeringkan", "dipotong", "dihaluskan", "diekstraksi",
+        "maserasi", "infusa", "dekokta", "decoction", "infusion", "boiled",
+        "brewed", "crushed", "ground", "dried", "macerated", "extracted",
+        "soaked", "powdered",
+    ]
+
+    labelled = _capture_label_value(
+        text,
+        [
+            "cara pengolahan", "cara pemakaian", "cara pembuatan", "preparation",
+            "processing method", "method of preparation",
+        ],
+        max_length=260,
+    )
+
+    findings = [labelled] if labelled else []
+
+    for sentence in _sentences(text):
+        if any(re.search(rf"\b{re.escape(word)}\b", sentence, re.IGNORECASE) for word in keywords):
+            findings.append(sentence[:260])
+        if len(findings) >= 4:
+            break
+
+    return " | ".join(_unique_preserve_order(findings)[:3])
+
+
+def _extract_composition_dose(text):
+    labelled = _capture_label_value(
+        text,
+        [
+            "komposisi/dosis", "komposisi", "dosis", "dose", "dosage",
+            "concentration", "konsentrasi",
+        ],
+        max_length=240,
+    )
+
+    findings = [labelled] if labelled else []
+    unit_pattern = re.compile(
+        r"\b\d+(?:[.,]\d+)?\s*(?:mg|g|kg|µg|μg|mcg|mL|ml|L|%|ppm|mol|mM|µM|μM)\b",
+        flags=re.IGNORECASE,
+    )
+
+    for sentence in _sentences(text):
+        lower = sentence.casefold()
+        if unit_pattern.search(sentence) and any(
+            cue in lower
+            for cue in (
+                "dose", "dosage", "dosis", "concentration", "konsentrasi",
+                "composition", "komposisi", "extract", "ekstrak", "administered",
+                "diberikan", "solution", "larutan",
+            )
+        ):
+            findings.append(sentence[:260])
+        if len(findings) >= 5:
+            break
+
+    return " | ".join(_unique_preserve_order(findings)[:4])
+
+
+def extract_entities_from_document(document):
+    """
+    Ekstraksi langsung dari isi dokumen.
+    Tidak melakukan lookup atau pencocokan ke dataset Excel.
+    """
+    text = document.get("text", "")
+    missing = "Tidak disebutkan dalam dokumen"
+
+    latin_name = _extract_latin_name(text)
+    plant_name, local_name = _extract_plant_and_local_names(text, latin_name)
+    plant_parts = _extract_plant_parts(text)
+    compounds = _extract_bioactive_compounds(text)
+    activities = _extract_biological_activities(text)
+    preparation = _extract_preparation(text)
+    composition_dose = _extract_composition_dose(text)
+
+    authors = _first_nonempty(document.get("authors"), "Penulis tidak terdeteksi")
+    title = _first_nonempty(document.get("title"), "Judul artikel tidak terdeteksi")
+    year = _first_nonempty(document.get("year"), "Tahun tidak terdeteksi")
+    doi = _first_nonempty(document.get("doi"), "DOI tidak terdeteksi")
+    filename = _first_nonempty(document.get("filename"), "Nama file tidak tersedia")
+
+    source_parts = [f"Penulis: {authors}", f"Judul: {title}", f"Tahun: {year}"]
+    if document.get("doi"):
+        source_parts.append(f"DOI: {document['doi']}")
+    source_parts.append(f"File: {filename}")
+
+    return {
+        "Nama Tanaman": _first_nonempty(plant_name, missing),
+        "Nama Latin": _first_nonempty(latin_name, missing),
+        "Nama Lokal/Daerah": _first_nonempty(local_name, missing),
+        "Bagian Tanaman": _first_nonempty(plant_parts, missing),
+        "Zat Bioaktif": _first_nonempty(compounds, missing),
+        "Khasiat/Efek Terapeutik": _first_nonempty(activities, missing),
+        "Cara Pengolahan": _first_nonempty(preparation, missing),
+        "Komposisi/Dosis": _first_nonempty(composition_dose, missing),
+        "Sumber Data": " | ".join(source_parts),
+        "Penulis Artikel": authors,
+        "Judul Artikel": title,
+        "Tahun Artikel": year,
+        "DOI": doi,
+        "Nama File": filename,
+        "Kategori Penyakit": missing,
+        "Gambar": "Belum terdeteksi",
+        "Mode Ekstraksi": "Dokumen langsung tanpa Excel",
+    }
 
 
 def get_column_map(df):
@@ -442,18 +1029,66 @@ def find_plant_image(result):
     return None
 
 
-def run_extraction(text_input, uploaded_file, df, dataset_status):
-    document_text, document_status = read_uploaded_file(uploaded_file)
-    combined_text = f"{text_input} {document_text}".strip()
 
-    row, match_status, score = find_best_match(df, combined_text)
-    result = extract_result(row, text_input, df)
+def run_extraction(text_input, uploaded_file, df, dataset_status):
+    """
+    Dua jalur ekstraksi:
+    1. Ada dokumen: seluruh entitas diambil langsung dari dokumen, Excel tidak dipakai.
+    2. Tanpa dokumen: input teks dicocokkan dengan dataset Excel.
+    """
+    if uploaded_file is not None:
+        document, document_status = read_uploaded_document(uploaded_file)
+
+        if document.get("text"):
+            result = extract_entities_from_document(document)
+            extraction_source = "Dokumen langsung — dataset Excel tidak digunakan."
+            match_status = (
+                "Seluruh entitas diekstrak dari teks dan metadata artikel yang diunggah. "
+                "Entitas yang tidak tertulis pada dokumen ditandai 'Tidak disebutkan dalam dokumen'."
+            )
+            score = None
+        else:
+            result = {
+                "Nama Tanaman": "Tidak terdeteksi",
+                "Nama Latin": "Tidak terdeteksi",
+                "Nama Lokal/Daerah": "Tidak terdeteksi",
+                "Bagian Tanaman": "Tidak terdeteksi",
+                "Zat Bioaktif": "Tidak terdeteksi",
+                "Khasiat/Efek Terapeutik": "Tidak terdeteksi",
+                "Cara Pengolahan": "Tidak terdeteksi",
+                "Komposisi/Dosis": "Tidak terdeteksi",
+                "Sumber Data": f"File: {getattr(uploaded_file, 'name', 'dokumen')}",
+                "Penulis Artikel": "Penulis tidak terdeteksi",
+                "Judul Artikel": "Judul artikel tidak terdeteksi",
+                "Tahun Artikel": "Tahun tidak terdeteksi",
+                "DOI": "DOI tidak terdeteksi",
+                "Nama File": getattr(uploaded_file, "name", "dokumen"),
+                "Kategori Penyakit": "Tidak terdeteksi",
+                "Gambar": "Belum terdeteksi",
+                "Mode Ekstraksi": "Dokumen langsung tanpa Excel",
+            }
+            extraction_source = "Dokumen langsung — dataset Excel tidak digunakan."
+            match_status = "Teks dokumen tidak tersedia untuk diekstrak."
+            score = None
+
+    else:
+        document_status = "Tidak ada dokumen yang diunggah."
+        row, match_status, score = find_best_match(df, text_input)
+        result = extract_result(row, text_input, df)
+        result.setdefault("Penulis Artikel", "Tidak berlaku — sumber berasal dari dataset")
+        result.setdefault("Judul Artikel", "Tidak berlaku — sumber berasal dari dataset")
+        result.setdefault("Tahun Artikel", "Tidak tersedia")
+        result.setdefault("DOI", "Tidak tersedia")
+        result.setdefault("Nama File", "Tidak ada dokumen")
+        result["Mode Ekstraksi"] = "Pencocokan input dengan dataset Excel"
+        extraction_source = dataset_status
+
     image_path = find_plant_image(result)
 
     st.session_state.last_result = result
     st.session_state.last_image = image_path
     st.session_state.last_status = {
-        "dataset": dataset_status,
+        "dataset": extraction_source,
         "document": document_status,
         "match": match_status,
         "score": score,
@@ -716,17 +1351,35 @@ def make_kg_graph(result):
 
 
 def build_relation_dataframe(result):
+    """Membuat triplet relasi dengan senyawa bioaktif sebagai fokus utama."""
     plant = result.get("Nama Tanaman", "Belum terdeteksi")
-    return pd.DataFrame([
-        [plant, "memiliki nama latin", result.get("Nama Latin", "")],
-        [plant, "memiliki nama lokal/daerah", result.get("Nama Lokal/Daerah", "")],
-        [plant, "menggunakan bagian tanaman", result.get("Bagian Tanaman", "")],
-        [plant, "mengandung senyawa bioaktif", result.get("Zat Bioaktif", "")],
-        [plant, "memiliki khasiat", result.get("Khasiat/Efek Terapeutik", "")],
-        [plant, "diolah dengan cara", result.get("Cara Pengolahan", "")],
-        [plant, "memiliki dosis/komposisi", result.get("Komposisi/Dosis", "")],
-        [plant, "bersumber dari", result.get("Sumber Data", "")],
-    ], columns=["Entitas Sumber", "Relasi", "Entitas Tujuan"])
+    latin = result.get("Nama Latin", "Belum terdeteksi")
+    local_name = result.get("Nama Lokal/Daerah", "Belum terdeteksi")
+    plant_part = result.get("Bagian Tanaman", "Belum terdeteksi")
+    compound = result.get("Zat Bioaktif", "Belum terdeteksi")
+    activity = result.get("Khasiat/Efek Terapeutik", "Belum terdeteksi")
+    preparation = result.get("Cara Pengolahan", "Belum terdeteksi")
+    dose = result.get("Komposisi/Dosis", "Belum terdeteksi")
+    source = result.get("Sumber Data", "Belum terdeteksi")
+
+    relations = [
+        # Relasi utama penelitian: tanaman → senyawa → aktivitas biologis
+        [plant, "mengandung senyawa bioaktif", compound],
+        [compound, "memiliki aktivitas biologis", activity],
+        [compound, "ditemukan pada bagian tanaman", plant_part],
+        [compound, "didukung oleh sumber data", source],
+
+        # Relasi pendukung identitas dan pemanfaatan tanaman
+        [plant, "memiliki nama latin", latin],
+        [plant, "memiliki nama lokal/daerah", local_name],
+        [plant, "diolah dengan cara", preparation],
+        [plant, "memiliki dosis/komposisi", dose],
+    ]
+
+    return pd.DataFrame(
+        relations,
+        columns=["Entitas Sumber", "Relasi", "Entitas Tujuan"],
+    )
 
 
 # =========================================================
@@ -973,108 +1626,10 @@ def search_recommendations(df, keyword):
         .reset_index(drop=True)
     )
 
-</style>
+
 # =========================================================
 # CSS
 # =========================================================
-/* =====================================================
-   FOKUS UTAMA SENYAWA BIOAKTIF
-   ===================================================== */
-
-.bioactive-main-card {
-    background:
-        radial-gradient(
-            circle at top right,
-            rgba(254, 215, 170, 0.75),
-            transparent 35%
-        ),
-        linear-gradient(
-            135deg,
-            #fff7ed 0%,
-            #fffbeb 50%,
-            #ecfdf5 100%
-        );
-
-    border: 2px solid #f59e0b;
-    border-left: 12px solid #f97316;
-    border-radius: 22px;
-    padding: 25px;
-    margin-top: 18px;
-    margin-bottom: 22px;
-    box-shadow: 0 14px 32px rgba(249, 115, 22, 0.15);
-}
-
-.bioactive-main-card h2 {
-    color: #9a3412;
-    font-size: 28px;
-    font-weight: 900;
-    margin: 0 0 8px 0;
-}
-
-.bioactive-number {
-    color: #ea580c;
-    font-size: 46px;
-    font-weight: 900;
-    line-height: 1;
-    margin-top: 10px;
-}
-
-.bioactive-description {
-    color: #475569;
-    font-size: 16px;
-    line-height: 1.6;
-}
-
-.bioactive-chip {
-    display: inline-block;
-    background: #ffffff;
-    color: #9a3412;
-    border: 1px solid #fdba74;
-    border-radius: 999px;
-    padding: 7px 13px;
-    margin: 5px 4px 0 0;
-    font-size: 13px;
-    font-weight: 800;
-}
-
-.bioactive-result {
-    background:
-        linear-gradient(
-            135deg,
-            #fff7ed 0%,
-            #fffbeb 55%,
-            #f0fdf4 100%
-        );
-
-    border: 2px solid #fb923c;
-    border-left: 12px solid #f97316;
-    border-radius: 20px;
-    padding: 23px;
-    margin-top: 18px;
-    margin-bottom: 22px;
-    box-shadow: 0 12px 28px rgba(249, 115, 22, 0.14);
-}
-
-.bioactive-result h2 {
-    color: #9a3412;
-    font-size: 25px;
-    font-weight: 900;
-    margin: 0 0 13px 0;
-}
-
-.bioactive-compound {
-    color: #c2410c;
-    font-size: 27px;
-    font-weight: 900;
-    margin-bottom: 10px;
-}
-
-.bioactive-relation {
-    color: #065f46;
-    font-size: 17px;
-    font-weight: 700;
-    line-height: 1.6;
-}
 hero_bg = find_optional_background()
 
 if hero_bg:
@@ -1274,6 +1829,88 @@ textarea {{
     color: #475569;
     font-size: 0.88rem;
 }}
+.bioactive-main-card {{
+    background:
+        radial-gradient(circle at top right, rgba(254,215,170,0.78), transparent 34%),
+        linear-gradient(135deg, #fff7ed 0%, #fffbeb 52%, #ecfdf5 100%);
+    border: 2px solid #f59e0b;
+    border-left: 0.75rem solid #f97316;
+    border-radius: 1.3rem;
+    padding: 1.45rem;
+    margin-top: 1rem;
+    margin-bottom: 1.25rem;
+    box-shadow: 0 14px 32px rgba(249,115,22,0.15);
+}}
+.bioactive-main-card h2 {{
+    color: #9a3412;
+    font-size: 1.65rem;
+    font-weight: 900;
+    margin: 0 0 0.4rem 0;
+}}
+.bioactive-number {{
+    color: #ea580c;
+    font-size: 2.9rem;
+    font-weight: 900;
+    line-height: 1;
+    margin-top: 0.55rem;
+}}
+.bioactive-description {{
+    color: #475569;
+    font-size: 0.98rem;
+    line-height: 1.6;
+    margin-top: 0.7rem;
+}}
+.bioactive-chip {{
+    display: inline-block;
+    background: #ffffff;
+    color: #9a3412;
+    border: 1px solid #fdba74;
+    border-radius: 999px;
+    padding: 0.38rem 0.7rem;
+    margin: 0.35rem 0.25rem 0 0;
+    font-size: 0.82rem;
+    font-weight: 800;
+}}
+.bioactive-result {{
+    background: linear-gradient(135deg, #fff7ed 0%, #fffbeb 55%, #f0fdf4 100%);
+    border: 2px solid #fb923c;
+    border-left: 0.75rem solid #f97316;
+    border-radius: 1.15rem;
+    padding: 1.3rem;
+    margin-top: 1rem;
+    margin-bottom: 1.15rem;
+    box-shadow: 0 12px 28px rgba(249,115,22,0.14);
+}}
+.bioactive-result h2 {{
+    color: #9a3412;
+    font-size: 1.45rem;
+    font-weight: 900;
+    margin: 0 0 0.7rem 0;
+}}
+.bioactive-compound {{
+    color: #c2410c;
+    font-size: 1.6rem;
+    font-weight: 900;
+    margin-bottom: 0.65rem;
+    overflow-wrap: anywhere;
+}}
+.bioactive-relation {{
+    color: #065f46;
+    font-size: 1rem;
+    font-weight: 700;
+    line-height: 1.65;
+    overflow-wrap: anywhere;
+}}
+.result-card.bioactive-card {{
+    background: linear-gradient(135deg, #fff7ed, #fffbeb);
+    border-left-color: #f97316;
+    border: 2px solid #fdba74;
+    border-left-width: 0.55rem;
+}}
+.result-card.bioactive-card h4 {{
+    color: #9a3412;
+}}
+
 </style>""",
     unsafe_allow_html=True,
 )
@@ -1300,7 +1937,7 @@ sidebar_nav_button(
     "nav_entity_result",
 )
 sidebar_nav_button(
-    "🔗 Relation Extraction",
+    "🔗 Bioactive Relation Extraction",
     "🔗 Relation Extraction",
     "nav_relation",
 )
@@ -1375,7 +2012,7 @@ st.sidebar.caption("© 2026 HyTBIONEX • Nazwita, M.Kom.")
 st.markdown(
     """<div class="top-header">
 <h1>🌿 HyTBIONEX</h1>
-<p>Sistem Ekstraksi Informasi Bioaktif Tanaman Herbal Indonesia dan HerbKG 2.0</p>
+<p>Sistem Ekstraksi Kandungan Bioaktif Tanaman Herbal Indonesia dan HerbKG 2.0</p>
 </div>""",
     unsafe_allow_html=True,
 )
@@ -1410,17 +2047,132 @@ def render_metrics():
     metric_cols = st.columns(5)
     metric_cols[0].metric("Total Baris", f"{total_rows:,}")
     metric_cols[1].metric("Total Tanaman", f"{total_plants:,}")
-    metric_cols[2].metric("Total Senyawa", f"{total_compounds:,}")
-    metric_cols[3].metric("Total Khasiat", f"{total_effects:,}")
+    metric_cols[2].metric("Senyawa Bioaktif", f"{total_compounds:,}")
+    metric_cols[3].metric("Aktivitas Biologis", f"{total_effects:,}")
     metric_cols[4].metric("Relasi Triplet", f"{total_relations:,}")
+
+
+def get_bioactive_statistics(df, top_n=10):
+    """Menghitung senyawa bioaktif unik dan frekuensi kemunculannya."""
+    compound_col = get_column_map(df).get("senyawa")
+
+    if df.empty or compound_col is None:
+        return 0, pd.DataFrame(columns=["Senyawa Bioaktif", "Jumlah Kemunculan"])
+
+    counter = Counter()
+    display_names = {}
+
+    for value in df[compound_col].tolist():
+        if pd.isna(value):
+            continue
+
+        raw_value = str(value).strip()
+        if not raw_value or raw_value.lower() in {"nan", "none", "belum terdeteksi"}:
+            continue
+
+        for compound in re.split(r"[,;/|]+", raw_value):
+            compound = re.sub(r"\s+", " ", compound).strip()
+            if not compound:
+                continue
+
+            key = compound.casefold()
+            counter[key] += 1
+            display_names.setdefault(key, compound)
+
+    top_rows = [
+        {
+            "Senyawa Bioaktif": display_names[key],
+            "Jumlah Kemunculan": count,
+        }
+        for key, count in counter.most_common(top_n)
+    ]
+
+    return len(counter), pd.DataFrame(top_rows)
+
+
+def render_bioactive_dashboard():
+    """Menonjolkan senyawa bioaktif sebagai fokus utama dashboard."""
+    total_unique, top_compounds = get_bioactive_statistics(df_data, top_n=10)
+
+    if not top_compounds.empty:
+        chips = "".join(
+            f'<span class="bioactive-chip">🧪 {safe_text(row["Senyawa Bioaktif"])}</span>'
+            for _, row in top_compounds.head(7).iterrows()
+        )
+    else:
+        chips = '<span class="bioactive-chip">Data senyawa belum ditemukan</span>'
+
+    st.markdown(
+        f"""<div class="bioactive-main-card">
+<h2>🧪 Fokus Utama: Kandungan Bioaktif Tanaman Herbal</h2>
+<div class="bioactive-number">{total_unique:,}</div>
+<div class="bioactive-description">
+Total senyawa bioaktif unik yang teridentifikasi pada dataset HyTBIONEX.
+Senyawa bioaktif menjadi penghubung utama antara tanaman herbal,
+bagian tanaman, aktivitas biologis/efek terapeutik, dan sumber bukti.
+</div>
+<div style="margin-top:0.65rem;">{chips}</div>
+</div>""",
+        unsafe_allow_html=True,
+    )
+
+    if not top_compounds.empty:
+        chart_df = top_compounds.sort_values("Jumlah Kemunculan", ascending=True)
+        fig = px.bar(
+            chart_df,
+            x="Jumlah Kemunculan",
+            y="Senyawa Bioaktif",
+            orientation="h",
+            text="Jumlah Kemunculan",
+            title="Senyawa Bioaktif yang Paling Sering Ditemukan",
+        )
+        fig.update_traces(textposition="outside")
+        fig.update_layout(
+            height=430,
+            plot_bgcolor="white",
+            paper_bgcolor="white",
+            xaxis_title="Jumlah Kemunculan",
+            yaxis_title="Senyawa Bioaktif",
+            margin=dict(l=20, r=35, t=65, b=20),
+        )
+        st.plotly_chart(
+            fig,
+            use_container_width=True,
+            key="dashboard_bioactive_chart",
+            config={"displaylogo": False},
+        )
+
+
+def render_bioactive_focus(result):
+    """Menampilkan rantai utama tanaman → senyawa → aktivitas biologis."""
+    plant = result.get("Nama Tanaman", "Belum terdeteksi")
+    compound = result.get("Zat Bioaktif", "Belum terdeteksi")
+    activity = result.get("Khasiat/Efek Terapeutik", "Belum terdeteksi")
+    part = result.get("Bagian Tanaman", "Belum terdeteksi")
+    source = result.get("Sumber Data", "Belum terdeteksi")
+
+    st.markdown(
+        f"""<div class="bioactive-result">
+<h2>🧪 Output Utama Ekstraksi Kandungan Bioaktif</h2>
+<div class="bioactive-compound">{safe_text(compound)}</div>
+<div class="bioactive-relation">
+🌿 <b>{safe_text(plant)}</b> → mengandung → 🧪 <b>{safe_text(compound)}</b><br>
+🧪 <b>{safe_text(compound)}</b> → ditemukan pada → 🍃 <b>{safe_text(part)}</b><br>
+🧪 <b>{safe_text(compound)}</b> → memiliki aktivitas biologis → 💚 <b>{safe_text(activity)}</b><br>
+📚 Sumber bukti → <b>{safe_text(source)}</b>
+</div>
+</div>""",
+        unsafe_allow_html=True,
+    )
+
 
 
 def render_status_box(dataset_text, document_text, match_text):
     st.markdown(
         f"""<div class="info-box">
-<b>Status Dataset:</b> {safe_text(dataset_text)}<br>
+<b>Mode/Sumber Ekstraksi:</b> {safe_text(dataset_text)}<br>
 <b>Status Dokumen:</b> {safe_text(document_text)}<br>
-<b>Status Koneksi Entitas:</b> {safe_text(match_text)}
+<b>Keterangan Ekstraksi:</b> {safe_text(match_text)}
 </div>""",
         unsafe_allow_html=True,
     )
@@ -1431,6 +2183,12 @@ def render_analysis_form(prefix, allow_text=True, allow_upload=True):
         '<div class="section-title">📝 Input dan Proses Ekstraksi</div>',
         unsafe_allow_html=True,
     )
+
+    if allow_upload:
+        st.caption(
+            "Saat dokumen diunggah, seluruh entitas diambil langsung dari isi artikel. "
+            "Dataset Excel tidak digunakan pada mode dokumen."
+        )
 
     text_input = ""
 
@@ -1451,7 +2209,7 @@ def render_analysis_form(prefix, allow_text=True, allow_upload=True):
         with right:
             uploaded_file = st.file_uploader(
                 "Unggah dokumen",
-                type=["pdf", "txt", "csv", "xlsx", "xls"],
+                type=["pdf", "docx", "txt", "csv", "xlsx", "xls"],
                 key=f"{prefix}_upload",
             )
 
@@ -1467,7 +2225,7 @@ def render_analysis_form(prefix, allow_text=True, allow_upload=True):
     else:
         uploaded_file = st.file_uploader(
             "Unggah dokumen",
-            type=["pdf", "txt", "csv", "xlsx", "xls"],
+            type=["pdf", "docx", "txt", "csv", "xlsx", "xls"],
             key=f"{prefix}_upload",
         )
 
@@ -1508,11 +2266,12 @@ def render_analysis_form(prefix, allow_text=True, allow_upload=True):
         render_all_outputs(
             result=result,
             image_path=image_path,
-            dataset_text=dataset_status,
+            dataset_text=st.session_state.last_status.get("dataset", dataset_status),
             document_text=document_status,
             match_text=match_status,
             key_prefix=f"{prefix}_output",
         )
+
 
 
 def render_result_cards(result):
@@ -1521,27 +2280,45 @@ def render_result_cards(result):
         unsafe_allow_html=True,
     )
 
+    year_doi = (
+        f"Tahun: {result.get('Tahun Artikel', 'Tidak terdeteksi')} | "
+        f"DOI: {result.get('DOI', 'Tidak terdeteksi')}"
+    )
+
     cards = [
-        ("🌿 Nama Tanaman", result.get("Nama Tanaman", "")),
-        ("🔬 Nama Latin", result.get("Nama Latin", "")),
-        ("🇮🇩 Nama Lokal/Daerah", result.get("Nama Lokal/Daerah", "")),
-        ("🍃 Bagian Tanaman", result.get("Bagian Tanaman", "")),
-        ("🧪 Zat Bioaktif", result.get("Zat Bioaktif", "")),
         (
-            "💚 Khasiat/Efek Terapeutik",
-            result.get("Khasiat/Efek Terapeutik", ""),
+            "🧪 SENYAWA BIOAKTIF — OUTPUT UTAMA",
+            result.get("Zat Bioaktif", "Tidak terdeteksi"),
+            True,
         ),
-        ("☕ Cara Pengolahan", result.get("Cara Pengolahan", "")),
-        ("⚖️ Komposisi/Dosis", result.get("Komposisi/Dosis", "")),
-        ("📚 Sumber Data", result.get("Sumber Data", "")),
+        (
+            "💚 AKTIVITAS BIOLOGIS / EFEK TERAPEUTIK",
+            result.get("Khasiat/Efek Terapeutik", "Tidak terdeteksi"),
+            True,
+        ),
+        ("🌿 Nama Tanaman", result.get("Nama Tanaman", "Tidak terdeteksi"), False),
+        ("🔬 Nama Latin", result.get("Nama Latin", "Tidak terdeteksi"), False),
+        (
+            "🇮🇩 Nama Lokal/Daerah",
+            result.get("Nama Lokal/Daerah", "Tidak terdeteksi"),
+            False,
+        ),
+        ("🍃 Bagian Tanaman", result.get("Bagian Tanaman", "Tidak terdeteksi"), False),
+        ("☕ Cara Pengolahan", result.get("Cara Pengolahan", "Tidak terdeteksi"), False),
+        ("⚖️ Komposisi/Dosis", result.get("Komposisi/Dosis", "Tidak terdeteksi"), False),
+        ("✍️ Penulis Artikel", result.get("Penulis Artikel", "Tidak terdeteksi"), False),
+        ("📄 Judul Artikel", result.get("Judul Artikel", "Tidak terdeteksi"), False),
+        ("📅 Tahun dan DOI", year_doi, False),
+        ("📚 Sumber Data", result.get("Sumber Data", "Tidak terdeteksi"), False),
     ]
 
     for start in range(0, len(cards), 3):
         row = st.columns(3)
-        for column, (title, value) in zip(row, cards[start:start + 3]):
+        for column, (title, value, is_bioactive) in zip(row, cards[start:start + 3]):
+            card_class = "result-card bioactive-card" if is_bioactive else "result-card"
             with column:
                 st.markdown(
-                    f"""<div class="result-card">
+                    f"""<div class="{card_class}">
 <h4>{safe_text(title)}</h4>
 <p>{safe_text(value)}</p>
 </div>""",
@@ -1567,21 +2344,21 @@ def render_image_section(result, image_path):
 
         with right:
             st.info(
-                "Gambar ditemukan dari kolom Gambar pada dataset "
-                "atau dari folder assets berdasarkan nama tanaman."
+                "Gambar pendukung ditemukan dari folder assets berdasarkan nama tanaman "
+                "hasil ekstraksi. Gambar tidak digunakan sebagai sumber entitas."
             )
             st.write("**Nama Tanaman:**", result.get("Nama Tanaman", ""))
             st.write("**Nama Latin:**", result.get("Nama Latin", ""))
     else:
         st.info(
             "Gambar belum ditemukan. Simpan gambar di folder assets, "
-            "contoh: assets/serai.jpg, atau isi kolom Gambar pada dataset."
+            "contoh: assets/serai.jpg. Entitas dokumen tetap diambil dari artikel."
         )
 
 
 def render_relation_table(result, key_prefix):
     st.markdown(
-        '<div class="section-title">🔗 Relation Extraction</div>',
+        '<div class="section-title">🔗 Bioactive Relation Extraction</div>',
         unsafe_allow_html=True,
     )
     relation_df = build_relation_dataframe(result)
@@ -1678,6 +2455,7 @@ def render_all_outputs(
     key_prefix,
 ):
     render_status_box(dataset_text, document_text, match_text)
+    render_bioactive_focus(result)
     render_result_cards(result)
     render_image_section(result, image_path)
     render_relation_table(result, key_prefix=f"{key_prefix}_relation")
@@ -1718,15 +2496,15 @@ def render_quick_access():
         (
             "📋",
             "Hasil Ekstraksi Entitas",
-            "Lihat kembali entitas hasil ekstraksi.",
-            "📋 Hasil Ekstraksi Entitas",
+            "Lihat kembali entitas hasil ekstraksi informasi bioaktif.",
+            "📋 Hasil Isolasi Entitas",
             "quick_entity",
         ),
         (
             "🔗",
             "Bioactive Relation Extraction",
-            "Lihat relasi antara tanaman dan atributnya.",
-            "🔗 Bioactive Relation Extraction",
+            "Lihat relasi utama tanaman, senyawa bioaktif, aktivitas biologis, dan sumber bukti.",
+            "🔗 Relation Extraction",
             "quick_relation",
         ),
         (
@@ -1859,6 +2637,7 @@ def render_evidence_query():
         st.success(
             f"Ditemukan {len(rows):,} baris bukti untuk tanaman {selected}."
         )
+        render_bioactive_focus(result)
         render_result_cards(result)
         render_relation_table(result, key_prefix="evidence_relation")
         render_kg_section(
@@ -2237,7 +3016,7 @@ if page == "🏠 Dashboard":
             """<div class="hero-banner">
 <h2>Selamat Datang di HyTBIONEX</h2>
 <p>
-Platform cerdas untuk ekstraksi informasi bioaktif tanaman herbal Indonesia,
+Platform cerdas untuk ekstraksi kandungan bioaktif tanaman herbal Indonesia,
 visualisasi HerbKG 2.0, analisis deskriptif, query graf berbasis bukti,
 analisis kemiripan, dan rekomendasi herbal.
 </p>
@@ -2253,6 +3032,7 @@ analisis kemiripan, dan rekomendasi herbal.
         st.caption("NED → BIE → RE → HerbKG 2.0")
 
     render_metrics()
+    render_bioactive_dashboard()
     render_analysis_form(
         prefix="dashboard",
         allow_text=True,
@@ -2275,7 +3055,7 @@ elif page == "📄 Upload Dokumen":
         allow_upload=True,
     )
 
-elif page == "📋  Informasi Ektraksi Entitas":
+elif page == "📋 Hasil Isolasi Entitas":
     if st.session_state.last_result:
         render_status_box(
             st.session_state.last_status.get("dataset", dataset_status),
@@ -2286,6 +3066,7 @@ elif page == "📋  Informasi Ektraksi Entitas":
                 "match", "Belum ada status pencocokan."
             ),
         )
+        render_bioactive_focus(st.session_state.last_result)
         render_result_cards(st.session_state.last_result)
         render_image_section(
             st.session_state.last_result,
@@ -2296,7 +3077,7 @@ elif page == "📋  Informasi Ektraksi Entitas":
             "Belum ada hasil ekstraksi. Jalankan Proses Ekstraksi terlebih dahulu."
         )
 
-elif page == "🔗 Bioaktive Relation Extraction":
+elif page == "🔗 Relation Extraction":
     if st.session_state.last_result:
         render_relation_table(
             st.session_state.last_result,
