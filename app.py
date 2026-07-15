@@ -232,7 +232,6 @@ def _unique_preserve_order(values):
 
     return output
 
-
 def _first_nonempty(value, fallback="Tidak disebutkan dalam dokumen"):
     value = re.sub(r"\s+", " ", str(value or "")).strip()
     return value if value else fallback
