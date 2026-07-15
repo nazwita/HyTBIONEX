@@ -2989,16 +2989,19 @@ def render_about_page():
     )
     st.write(
         """
-        **HyTBIONEX** adalah prototipe sistem ekstraksi informasi bioaktif
-        tanaman herbal Indonesia. Sistem menghubungkan entitas tanaman,
-        nama Latin, nama lokal/daerah, bagian tanaman, zat bioaktif,
-        khasiat/efek terapeutik, cara pengolahan, dosis/komposisi, dan
-        sumber data ke dalam HerbKG 2.0.
+        **HyTBIONEX merupakan prototipe sistem cerdas untuk mengekstraksi, 
+        mengintegrasikan, dan memvisualisasikan informasi bioaktif tanaman herbal Indonesia. 
+        Sistem ini menghubungkan entitas nama tanaman, nama Latin, 
+        nama lokal atau daerah, bagian tanaman, senyawa bioaktif, aktivitas biologis atau efek terapeutik, 
+        cara pengolahan, dosis atau komposisi, serta sumber data ke dalam HerbKG 2.0. Pada input dokumen, 
+       sumber data diperoleh secara langsung dari judul artikel, nama penulis, dan tahun publikasi,
+        sehingga setiap informasi yang diekstraksi dapat ditelusuri kembali secara terstruktur dan berbasis bukti ilmiah.
 
-        **Pipeline:** Input → Preprocessing → NED → BIE → Relation Extraction
-        → HerbKG 2.0 → Aplikasi Downstream.
 
-        **Peneliti:** Nazwita, M.Kom.
+        **Pipeline:** Input → Preprocessing → Split Data → Adaftive Fine Tuning  → NED → BIE → Bioaktive Relation Extraction
+        → HerbKG 2.0 → Aplikasi Downstream → Evaluasi  → Model HyTBIONEX
+
+        **Peneliti:** Nazwita
         """
     )
 
@@ -3055,7 +3058,7 @@ elif page == "📄 Upload Dokumen":
         allow_upload=True,
     )
 
-elif page == "📋 Bioaktif Infoemasi Entitas":
+elif page == "📋 Bioaktif Informasi Entitas":
     if st.session_state.last_result:
         render_status_box(
             st.session_state.last_status.get("dataset", dataset_status),
