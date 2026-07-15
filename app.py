@@ -973,10 +973,108 @@ def search_recommendations(df, keyword):
         .reset_index(drop=True)
     )
 
-
+</style>
 # =========================================================
 # CSS
 # =========================================================
+/* =====================================================
+   FOKUS UTAMA SENYAWA BIOAKTIF
+   ===================================================== */
+
+.bioactive-main-card {
+    background:
+        radial-gradient(
+            circle at top right,
+            rgba(254, 215, 170, 0.75),
+            transparent 35%
+        ),
+        linear-gradient(
+            135deg,
+            #fff7ed 0%,
+            #fffbeb 50%,
+            #ecfdf5 100%
+        );
+
+    border: 2px solid #f59e0b;
+    border-left: 12px solid #f97316;
+    border-radius: 22px;
+    padding: 25px;
+    margin-top: 18px;
+    margin-bottom: 22px;
+    box-shadow: 0 14px 32px rgba(249, 115, 22, 0.15);
+}
+
+.bioactive-main-card h2 {
+    color: #9a3412;
+    font-size: 28px;
+    font-weight: 900;
+    margin: 0 0 8px 0;
+}
+
+.bioactive-number {
+    color: #ea580c;
+    font-size: 46px;
+    font-weight: 900;
+    line-height: 1;
+    margin-top: 10px;
+}
+
+.bioactive-description {
+    color: #475569;
+    font-size: 16px;
+    line-height: 1.6;
+}
+
+.bioactive-chip {
+    display: inline-block;
+    background: #ffffff;
+    color: #9a3412;
+    border: 1px solid #fdba74;
+    border-radius: 999px;
+    padding: 7px 13px;
+    margin: 5px 4px 0 0;
+    font-size: 13px;
+    font-weight: 800;
+}
+
+.bioactive-result {
+    background:
+        linear-gradient(
+            135deg,
+            #fff7ed 0%,
+            #fffbeb 55%,
+            #f0fdf4 100%
+        );
+
+    border: 2px solid #fb923c;
+    border-left: 12px solid #f97316;
+    border-radius: 20px;
+    padding: 23px;
+    margin-top: 18px;
+    margin-bottom: 22px;
+    box-shadow: 0 12px 28px rgba(249, 115, 22, 0.14);
+}
+
+.bioactive-result h2 {
+    color: #9a3412;
+    font-size: 25px;
+    font-weight: 900;
+    margin: 0 0 13px 0;
+}
+
+.bioactive-compound {
+    color: #c2410c;
+    font-size: 27px;
+    font-weight: 900;
+    margin-bottom: 10px;
+}
+
+.bioactive-relation {
+    color: #065f46;
+    font-size: 17px;
+    font-weight: 700;
+    line-height: 1.6;
+}
 hero_bg = find_optional_background()
 
 if hero_bg:
