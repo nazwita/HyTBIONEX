@@ -2248,7 +2248,7 @@ def render_bioactive_dashboard():
 
     st.markdown(
         f"""<div class="bioactive-main-card">
-<h2>🧪 Fokus Utama: Kandungan Bioaktif Tanaman Herbal</h2>
+<h2>🧪  Kandungan Zat Bioaktif Tanaman Herbal</h2>
 <div class="bioactive-number">{total_unique:,}</div>
 <div class="bioactive-description">
 Total senyawa bioaktif unik yang teridentifikasi pada dataset HyTBIONEX.
@@ -2426,7 +2426,7 @@ def render_result_cards(result):
 
     cards = [
         (
-            "🧪 SENYAWA BIOAKTIF — OUTPUT UTAMA",
+            "🧪 SENYAWA BIOAKTIF,
             result.get("Zat Bioaktif", "Tidak terdeteksi"),
             True,
         ),
@@ -3144,10 +3144,10 @@ def render_about_page():
         sumber data diperoleh secara langsung dari judul artikel, nama penulis,  dan tahun publikasi, 
         sehingga setiap informasi yang diekstraksi dapat ditelusuri kembali secara terstruktur dan berbasis bukti ilmiah.
 
-        **Pipeline:** Input → Preprocessing → NED → BIE → Relation Extraction
+        **Pipeline:** Input → Preprocessing → Adaptive Fine Tuning → BIE → NED → Hybrid Transformer → BRE 
         → HerbKG 2.0 → Aplikasi Downstream.
 
-        **Peneliti:** Nazwita, M.Kom.
+        **Peneliti:** NAZWITA
         """
     )
 
@@ -3178,7 +3178,7 @@ analisis kemiripan, dan rekomendasi herbal.
         st.write("**Dataset aktif**")
         st.caption(dataset_status)
         st.write("**Model pipeline**")
-        st.caption("NED → BIE → RE → HerbKG 2.0")
+        st.caption("Adaptive Fine Tuning → BIE → NED → Hybrid Transformer → BRE → HerbKG 2.0")
 
     render_metrics()
     render_bioactive_dashboard()
@@ -3226,7 +3226,7 @@ elif page == "📋 Bioaktif Informasi Ekstraksi":
             "Belum ada hasil ekstraksi. Jalankan Proses Ekstraksi terlebih dahulu."
         )
 
-elif page == "🔗 Relation Extraction":
+elif page == "🔗 Relasi Ekstraksi":
     if st.session_state.last_result:
         render_relation_table(
             st.session_state.last_result,
