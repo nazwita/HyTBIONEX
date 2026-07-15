@@ -1619,16 +1619,16 @@ def render_quick_access():
     quick_items = [
         (
             "📋",
-            "Hasil Isolasi Entitas",
+            "Hasil Ekstraksi Entitas",
             "Lihat kembali entitas hasil ekstraksi.",
-            "📋 Hasil Isolasi Entitas",
+            "📋 Hasil Ekstraksi Entitas",
             "quick_entity",
         ),
         (
             "🔗",
-            "Relation Extraction",
+            "Bioactive Relation Extraction",
             "Lihat relasi antara tanaman dan atributnya.",
-            "🔗 Relation Extraction",
+            "🔗 Bioactive Relation Extraction",
             "quick_relation",
         ),
         (
