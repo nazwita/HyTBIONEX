@@ -238,17 +238,6 @@ def _first_nonempty(value, fallback="Tidak disebutkan dalam dokumen"):
     return value if value else fallback
 
 
-def _extract_doi(text):
-    match = re.search(
-        r"\b10\.\d{4,9}/[-._;()/:A-Za-z0-9]+",
-        str(text or ""),
-        flags=re.IGNORECASE,
-    )
-    if not match:
-        return ""
-    return match.group(0).rstrip(".,;)")
-
-
 def _extract_year(text):
     years = re.findall(r"\b(?:19|20)\d{2}\b", str(text or "")[:8000])
     if not years:
@@ -381,7 +370,6 @@ def read_uploaded_document(uploaded_file):
         "title": "",
         "authors": "",
         "year": "",
-        "doi": "",
         "pages": 0,
         "format": Path(filename).suffix.lower().replace(".", "").upper(),
     }
@@ -449,8 +437,6 @@ def read_uploaded_document(uploaded_file):
                 "PDF kemungkinan berupa scan/gambar dan membutuhkan OCR.",
             )
 
-        document["doi"] = _extract_doi(document["text"])
-
         if not document["title"]:
             document["title"] = _detect_article_title(document["text"])
         if not document["authors"]:
@@ -467,8 +453,6 @@ def read_uploaded_document(uploaded_file):
         ]
         if document["pages"]:
             status_parts.append(f"{document['pages']} halaman")
-        if document["authors"]:
-            status_parts.append(f"penulis: {document['authors']}")
 
         return document, " | ".join(status_parts)
 
@@ -744,46 +728,204 @@ def _extract_biological_activities(text):
     return ", ".join(_unique_preserve_order(found)[:12])
 
 
+def _remove_article_citations(text):
+    """Membersihkan sitasi artikel tanpa mengubah angka dosis penting."""
+    value = str(text or "")
+    value = re.sub(r"\[(?:\d+|\d+\s*[-–]\s*\d+)(?:\s*,\s*\d+)*\]", "", value)
+    value = re.sub(
+        r"\((?:[A-ZÀ-ÖØ-Þ][A-Za-zÀ-ÖØ-öø-ÿ'’.-]+(?:\s+et\s+al\.)?,?\s*)?"
+        r"(?:19|20)\d{2}[a-z]?(?:\s*;\s*[^)]*(?:19|20)\d{2}[a-z]?)*\)",
+        "",
+        value,
+        flags=re.IGNORECASE,
+    )
+    return re.sub(r"\s+", " ", value).strip(" ,;:.|-\n\t")
+
+
+def _compact_article_point(text, max_chars=185):
+    """Mengubah kalimat artikel menjadi satu poin ringkas dan tetap faktual."""
+    value = _remove_article_citations(text)
+    value = re.sub(
+        r"^(?:cara pengolahan|cara pemakaian|cara pembuatan|preparation|"
+        r"processing method|method of preparation|komposisi/dosis|komposisi|"
+        r"dosis|dose|dosage|concentration|konsentrasi)\s*[:\-]\s*",
+        "",
+        value,
+        flags=re.IGNORECASE,
+    )
+    value = re.sub(r"\s+", " ", value).strip(" ,;:.|-")
+
+    if not value:
+        return ""
+
+    if len(value) > max_chars:
+        truncated = value[:max_chars]
+        cut_positions = [
+            truncated.rfind("; "),
+            truncated.rfind(", "),
+            truncated.rfind(" dan "),
+            truncated.rfind(" and "),
+            truncated.rfind(" "),
+        ]
+        cut = max(cut_positions)
+        if cut >= int(max_chars * 0.60):
+            value = truncated[:cut]
+        else:
+            value = truncated
+        value = value.rstrip(" ,;:.") + "…"
+
+    return value
+
+
+def _extract_section_text(text, headings, max_chars=2200):
+    """Mengambil teks setelah judul bagian artikel yang relevan."""
+    lines = str(text or "").splitlines()
+    headings_lower = [heading.casefold() for heading in headings]
+    collected = []
+
+    for index, line in enumerate(lines):
+        clean_line = re.sub(r"\s+", " ", line).strip()
+        lower = clean_line.casefold()
+
+        if not clean_line or len(clean_line) > 170:
+            continue
+
+        if any(heading in lower for heading in headings_lower):
+            section_lines = []
+            char_count = 0
+
+            for following in lines[index + 1:index + 18]:
+                following_clean = re.sub(r"\s+", " ", following).strip()
+                if not following_clean:
+                    continue
+
+                # Hentikan saat menemukan heading baru yang pendek.
+                looks_like_heading = (
+                    len(following_clean) <= 90
+                    and len(following_clean.split()) <= 10
+                    and (
+                        following_clean.isupper()
+                        or re.match(r"^\d+(?:\.\d+)*\s+[A-ZÀ-ÖØ-Þ]", following_clean)
+                    )
+                )
+                if looks_like_heading and section_lines:
+                    break
+
+                section_lines.append(following_clean)
+                char_count += len(following_clean)
+                if char_count >= max_chars:
+                    break
+
+            if section_lines:
+                collected.append(" ".join(section_lines))
+
+    return "\n".join(collected)
+
+
+def _rank_and_summarise_points(candidates, cue_terms, max_points=2):
+    """Memilih poin paling relevan dari artikel tanpa menambah informasi baru."""
+    scored = []
+
+    for order, candidate in enumerate(candidates):
+        point = _compact_article_point(candidate)
+        if not point:
+            continue
+
+        lower = point.casefold()
+        score = sum(2 for cue in cue_terms if cue.casefold() in lower)
+        score += 2 if re.search(r"\b\d+(?:[.,]\d+)?\s*(?:mg|g|kg|µg|μg|mcg|ml|mL|l|L|%|ppm|menit|minute|minutes|jam|hour|hours)\b", point, re.IGNORECASE) else 0
+        score += 1 if 35 <= len(point) <= 180 else 0
+        score -= order * 0.01
+        scored.append((score, order, point))
+
+    scored.sort(key=lambda item: (-item[0], item[1]))
+
+    selected = []
+    seen = set()
+    for _, _, point in scored:
+        key = clean_text(point)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        selected.append(point)
+        if len(selected) >= max_points:
+            break
+
+    if not selected:
+        return ""
+
+    return "; ".join(f"{index + 1}) {point}" for index, point in enumerate(selected))
+
+
 def _extract_preparation(text):
+    """
+    Mengambil cara pengolahan langsung dari artikel lalu meringkasnya
+    menjadi maksimal dua poin penting.
+    """
+    labels = [
+        "cara pengolahan", "cara pemakaian", "cara pembuatan",
+        "preparation", "processing method", "method of preparation",
+        "preparation of extract", "extract preparation", "sample preparation",
+    ]
     keywords = [
         "direbus", "rebus", "diseduh", "seduh", "ditumbuk", "tumbuk",
         "digiling", "dikeringkan", "dipotong", "dihaluskan", "diekstraksi",
         "maserasi", "infusa", "dekokta", "decoction", "infusion", "boiled",
         "brewed", "crushed", "ground", "dried", "macerated", "extracted",
-        "soaked", "powdered",
+        "soaked", "powdered", "filtered", "disaring", "evaporated",
+        "diuapkan", "heated", "dipanaskan",
     ]
 
-    labelled = _capture_label_value(
-        text,
-        [
-            "cara pengolahan", "cara pemakaian", "cara pembuatan", "preparation",
-            "processing method", "method of preparation",
-        ],
-        max_length=260,
-    )
+    candidates = []
 
-    findings = [labelled] if labelled else []
+    labelled = _capture_label_value(text, labels, max_length=420)
+    if labelled:
+        candidates.append(labelled)
+
+    section_text = _extract_section_text(text, labels)
+    if section_text:
+        candidates.extend(_sentences(section_text))
 
     for sentence in _sentences(text):
-        if any(re.search(rf"\b{re.escape(word)}\b", sentence, re.IGNORECASE) for word in keywords):
-            findings.append(sentence[:260])
-        if len(findings) >= 4:
+        lower = sentence.casefold()
+        if any(keyword.casefold() in lower for keyword in keywords):
+            candidates.append(sentence)
+        if len(candidates) >= 15:
             break
 
-    return " | ".join(_unique_preserve_order(findings)[:3])
-
-
-def _extract_composition_dose(text):
-    labelled = _capture_label_value(
-        text,
-        [
-            "komposisi/dosis", "komposisi", "dosis", "dose", "dosage",
-            "concentration", "konsentrasi",
-        ],
-        max_length=240,
+    return _rank_and_summarise_points(
+        candidates,
+        cue_terms=keywords,
+        max_points=2,
     )
 
-    findings = [labelled] if labelled else []
+def _extract_composition_dose(text):
+    """
+    Mengambil komposisi, konsentrasi, atau dosis langsung dari artikel
+    lalu meringkasnya menjadi maksimal dua poin penting.
+    """
+    labels = [
+        "komposisi/dosis", "komposisi", "dosis", "dose", "dosage",
+        "concentration", "konsentrasi", "formulation", "composition",
+        "extract concentration", "treatment dose",
+    ]
+    cue_terms = [
+        "dosis", "dose", "dosage", "komposisi", "composition",
+        "konsentrasi", "concentration", "ekstrak", "extract",
+        "larutan", "solution", "diberikan", "administered",
+        "formulasi", "formulation",
+    ]
+
+    candidates = []
+
+    labelled = _capture_label_value(text, labels, max_length=420)
+    if labelled:
+        candidates.append(labelled)
+
+    section_text = _extract_section_text(text, labels)
+    if section_text:
+        candidates.extend(_sentences(section_text))
+
     unit_pattern = re.compile(
         r"\b\d+(?:[.,]\d+)?\s*(?:mg|g|kg|µg|μg|mcg|mL|ml|L|%|ppm|mol|mM|µM|μM)\b",
         flags=re.IGNORECASE,
@@ -791,25 +933,28 @@ def _extract_composition_dose(text):
 
     for sentence in _sentences(text):
         lower = sentence.casefold()
-        if unit_pattern.search(sentence) and any(
-            cue in lower
-            for cue in (
-                "dose", "dosage", "dosis", "concentration", "konsentrasi",
-                "composition", "komposisi", "extract", "ekstrak", "administered",
-                "diberikan", "solution", "larutan",
-            )
-        ):
-            findings.append(sentence[:260])
-        if len(findings) >= 5:
+        has_cue = any(cue.casefold() in lower for cue in cue_terms)
+        if unit_pattern.search(sentence) and has_cue:
+            candidates.append(sentence)
+        elif has_cue and any(term in lower for term in ("ratio", "perbandingan", "formula", "formulasi")):
+            candidates.append(sentence)
+        if len(candidates) >= 18:
             break
 
-    return " | ".join(_unique_preserve_order(findings)[:4])
-
+    return _rank_and_summarise_points(
+        candidates,
+        cue_terms=cue_terms,
+        max_points=2,
+    )
 
 def extract_entities_from_document(document):
     """
-    Ekstraksi langsung dari isi dokumen.
-    Tidak melakukan lookup atau pencocokan ke dataset Excel.
+    Mengekstrak seluruh entitas langsung dari isi dokumen.
+    Dataset Excel tidak digunakan pada mode Upload Dokumen.
+
+    Metadata artikel tidak ditampilkan sebagai kotak atau bagian terpisah.
+    Penulis, tahun, dan judul artikel hanya digabungkan pada kolom Sumber Data.
+    DOI tidak ditampilkan.
     """
     text = document.get("text", "")
     missing = "Tidak disebutkan dalam dokumen"
@@ -822,16 +967,25 @@ def extract_entities_from_document(document):
     preparation = _extract_preparation(text)
     composition_dose = _extract_composition_dose(text)
 
-    authors = _first_nonempty(document.get("authors"), "Penulis tidak terdeteksi")
-    title = _first_nonempty(document.get("title"), "Judul artikel tidak terdeteksi")
-    year = _first_nonempty(document.get("year"), "Tahun tidak terdeteksi")
-    doi = _first_nonempty(document.get("doi"), "DOI tidak terdeteksi")
-    filename = _first_nonempty(document.get("filename"), "Nama file tidak tersedia")
+    authors = _first_nonempty(
+        document.get("authors"),
+        "Penulis tidak terdeteksi",
+    )
+    year = _first_nonempty(
+        document.get("year"),
+        "Tahun tidak terdeteksi",
+    )
+    article_title = _first_nonempty(
+        document.get("title"),
+        "Judul artikel tidak terdeteksi",
+    )
 
-    source_parts = [f"Penulis: {authors}", f"Judul: {title}", f"Tahun: {year}"]
-    if document.get("doi"):
-        source_parts.append(f"DOI: {document['doi']}")
-    source_parts.append(f"File: {filename}")
+    # Metadata artikel hanya tampil di dalam satu entitas Sumber Data.
+    source_data = (
+        f"Penulis: {authors} | "
+        f"Tahun: {year} | "
+        f"Judul Artikel: {article_title}"
+    )
 
     return {
         "Nama Tanaman": _first_nonempty(plant_name, missing),
@@ -842,12 +996,7 @@ def extract_entities_from_document(document):
         "Khasiat/Efek Terapeutik": _first_nonempty(activities, missing),
         "Cara Pengolahan": _first_nonempty(preparation, missing),
         "Komposisi/Dosis": _first_nonempty(composition_dose, missing),
-        "Sumber Data": " | ".join(source_parts),
-        "Penulis Artikel": authors,
-        "Judul Artikel": title,
-        "Tahun Artikel": year,
-        "DOI": doi,
-        "Nama File": filename,
+        "Sumber Data": source_data,
         "Kategori Penyakit": missing,
         "Gambar": "Belum terdeteksi",
         "Mode Ekstraksi": "Dokumen langsung tanpa Excel",
@@ -1043,11 +1192,17 @@ def run_extraction(text_input, uploaded_file, df, dataset_status):
             result = extract_entities_from_document(document)
             extraction_source = "Dokumen langsung — dataset Excel tidak digunakan."
             match_status = (
-                "Seluruh entitas diekstrak dari teks dan metadata artikel yang diunggah. "
-                "Entitas yang tidak tertulis pada dokumen ditandai 'Tidak disebutkan dalam dokumen'."
+                "Seluruh entitas diekstrak langsung dari isi artikel. "
+                "Cara pengolahan dan komposisi/dosis diringkas menjadi poin utama. "
+                "Informasi yang tidak tertulis ditandai 'Tidak disebutkan dalam dokumen'."
             )
             score = None
         else:
+            source_data = (
+                "Penulis: Penulis tidak terdeteksi | "
+                "Tahun: Tahun tidak terdeteksi | "
+                "Judul Artikel: Judul artikel tidak terdeteksi"
+            )
             result = {
                 "Nama Tanaman": "Tidak terdeteksi",
                 "Nama Latin": "Tidak terdeteksi",
@@ -1057,12 +1212,7 @@ def run_extraction(text_input, uploaded_file, df, dataset_status):
                 "Khasiat/Efek Terapeutik": "Tidak terdeteksi",
                 "Cara Pengolahan": "Tidak terdeteksi",
                 "Komposisi/Dosis": "Tidak terdeteksi",
-                "Sumber Data": f"File: {getattr(uploaded_file, 'name', 'dokumen')}",
-                "Penulis Artikel": "Penulis tidak terdeteksi",
-                "Judul Artikel": "Judul artikel tidak terdeteksi",
-                "Tahun Artikel": "Tahun tidak terdeteksi",
-                "DOI": "DOI tidak terdeteksi",
-                "Nama File": getattr(uploaded_file, "name", "dokumen"),
+                "Sumber Data": source_data,
                 "Kategori Penyakit": "Tidak terdeteksi",
                 "Gambar": "Belum terdeteksi",
                 "Mode Ekstraksi": "Dokumen langsung tanpa Excel",
@@ -1075,11 +1225,6 @@ def run_extraction(text_input, uploaded_file, df, dataset_status):
         document_status = "Tidak ada dokumen yang diunggah."
         row, match_status, score = find_best_match(df, text_input)
         result = extract_result(row, text_input, df)
-        result.setdefault("Penulis Artikel", "Tidak berlaku — sumber berasal dari dataset")
-        result.setdefault("Judul Artikel", "Tidak berlaku — sumber berasal dari dataset")
-        result.setdefault("Tahun Artikel", "Tidak tersedia")
-        result.setdefault("DOI", "Tidak tersedia")
-        result.setdefault("Nama File", "Tidak ada dokumen")
         result["Mode Ekstraksi"] = "Pencocokan input dengan dataset Excel"
         extraction_source = dataset_status
 
@@ -1095,7 +1240,6 @@ def run_extraction(text_input, uploaded_file, df, dataset_status):
     }
 
     return result, image_path, document_status, match_status
-
 
 # =========================================================
 # FUNGSI NAVIGASI
@@ -1932,8 +2076,8 @@ st.sidebar.markdown(
 sidebar_nav_button("🌿 Input Tanaman", "🌿 Input Tanaman", "nav_input")
 sidebar_nav_button("📄 Upload Dokumen", "📄 Upload Dokumen", "nav_upload")
 sidebar_nav_button(
-    "📋 Hasil Isolasi Entitas",
-    "📋 Hasil Isolasi Entitas",
+    "📋 Bioaktif Informasi Ekstraksi",
+    "📋 Bioaktif Informasi Ekstraksi",
     "nav_entity_result",
 )
 sidebar_nav_button(
@@ -2276,13 +2420,8 @@ def render_analysis_form(prefix, allow_text=True, allow_upload=True):
 
 def render_result_cards(result):
     st.markdown(
-        '<div class="section-title">📋 Hasil Ekstraksi Informasi Bioaktif</div>',
+        '<div class="section-title">📋 Bioaktif Informasi Ekstraksi</div>',
         unsafe_allow_html=True,
-    )
-
-    year_doi = (
-        f"Tahun: {result.get('Tahun Artikel', 'Tidak terdeteksi')} | "
-        f"DOI: {result.get('DOI', 'Tidak terdeteksi')}"
     )
 
     cards = [
@@ -2304,12 +2443,21 @@ def render_result_cards(result):
             False,
         ),
         ("🍃 Bagian Tanaman", result.get("Bagian Tanaman", "Tidak terdeteksi"), False),
-        ("☕ Cara Pengolahan", result.get("Cara Pengolahan", "Tidak terdeteksi"), False),
-        ("⚖️ Komposisi/Dosis", result.get("Komposisi/Dosis", "Tidak terdeteksi"), False),
-        ("✍️ Penulis Artikel", result.get("Penulis Artikel", "Tidak terdeteksi"), False),
-        ("📄 Judul Artikel", result.get("Judul Artikel", "Tidak terdeteksi"), False),
-        ("📅 Tahun dan DOI", year_doi, False),
-        ("📚 Sumber Data", result.get("Sumber Data", "Tidak terdeteksi"), False),
+        (
+            "☕ Cara Pengolahan — Ringkasan Poin Artikel",
+            result.get("Cara Pengolahan", "Tidak terdeteksi"),
+            False,
+        ),
+        (
+            "⚖️ Komposisi/Dosis — Ringkasan Poin Artikel",
+            result.get("Komposisi/Dosis", "Tidak terdeteksi"),
+            False,
+        ),
+        (
+            "📚 Sumber Data",
+            result.get("Sumber Data", "Tidak terdeteksi"),
+            False,
+        ),
     ]
 
     for start in range(0, len(cards), 3):
@@ -2318,13 +2466,12 @@ def render_result_cards(result):
             card_class = "result-card bioactive-card" if is_bioactive else "result-card"
             with column:
                 st.markdown(
-                    f"""<div class="{card_class}">
+                    f'''<div class="{card_class}">
 <h4>{safe_text(title)}</h4>
 <p>{safe_text(value)}</p>
-</div>""",
+</div>''',
                     unsafe_allow_html=True,
                 )
-
 
 def render_image_section(result, image_path):
     st.markdown(
@@ -2495,9 +2642,9 @@ def render_quick_access():
     quick_items = [
         (
             "📋",
-            "Hasil Ekstraksi Entitas",
+            "Bioaktif Informasi Ekstraksi",
             "Lihat kembali entitas hasil ekstraksi informasi bioaktif.",
-            "📋 Hasil Isolasi Entitas",
+            "📋 Bioaktif Informasi Ekstraksi",
             "quick_entity",
         ),
         (
@@ -2989,19 +3136,18 @@ def render_about_page():
     )
     st.write(
         """
-        **HyTBIONEX merupakan prototipe sistem cerdas untuk mengekstraksi, 
-        mengintegrasikan, dan memvisualisasikan informasi bioaktif tanaman herbal Indonesia. 
-        Sistem ini menghubungkan entitas nama tanaman, nama Latin, 
-        nama lokal atau daerah, bagian tanaman, senyawa bioaktif, aktivitas biologis atau efek terapeutik, 
-        cara pengolahan, dosis atau komposisi, serta sumber data ke dalam HerbKG 2.0. Pada input dokumen, 
-       sumber data diperoleh secara langsung dari judul artikel, nama penulis, dan tahun publikasi,
+        **HyTBIONEX** HyTBIONEX merupakan prototipe sistem cerdas untuk mengekstraksi, 
+        mengintegrasikan, dan memvisualisasikan informasi bioaktif tanaman herbal Indonesia.
+        Sistem ini menghubungkan entitas nama tanaman, nama Latin, nama lokal atau daerah, 
+        bagian tanaman, senyawa bioaktif, aktivitas biologis atau efek terapeutik, cara pengolahan, 
+        dosis atau komposisi, serta sumber data ke dalam HerbKG 2.0. Pada input dokumen,
+        sumber data diperoleh secara langsung dari judul artikel, nama penulis,  dan tahun publikasi, 
         sehingga setiap informasi yang diekstraksi dapat ditelusuri kembali secara terstruktur dan berbasis bukti ilmiah.
 
+        **Pipeline:** Input → Preprocessing → NED → BIE → Relation Extraction
+        → HerbKG 2.0 → Aplikasi Downstream.
 
-        **Pipeline:** Input → Preprocessing → Split Data → Adaftive Fine Tuning  → NED → BIE → Bioaktive Relation Extraction
-        → HerbKG 2.0 → Aplikasi Downstream → Evaluasi  → Model HyTBIONEX
-
-        **Peneliti:** Nazwita
+        **Peneliti:** Nazwita, M.Kom.
         """
     )
 
@@ -3058,7 +3204,7 @@ elif page == "📄 Upload Dokumen":
         allow_upload=True,
     )
 
-elif page == "📋 Bioaktif Informasi Entitas":
+elif page == "📋 Bioaktif Informasi Ekstraksi":
     if st.session_state.last_result:
         render_status_box(
             st.session_state.last_status.get("dataset", dataset_status),
@@ -3080,7 +3226,7 @@ elif page == "📋 Bioaktif Informasi Entitas":
             "Belum ada hasil ekstraksi. Jalankan Proses Ekstraksi terlebih dahulu."
         )
 
-elif page == "🔗 Bioaktif Relasi Ekstraksi":
+elif page == "🔗 Relation Extraction":
     if st.session_state.last_result:
         render_relation_table(
             st.session_state.last_result,
