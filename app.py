@@ -2177,7 +2177,7 @@ elif page == "📄 Upload Dokumen":
         allow_upload=True,
     )
 
-elif page == "📋 Hasil Isolasi Entitas":
+elif page == "📋  Informasi Ektraksi Entitas":
     if st.session_state.last_result:
         render_status_box(
             st.session_state.last_status.get("dataset", dataset_status),
@@ -2198,7 +2198,7 @@ elif page == "📋 Hasil Isolasi Entitas":
             "Belum ada hasil ekstraksi. Jalankan Proses Ekstraksi terlebih dahulu."
         )
 
-elif page == "🔗 Relation Extraction":
+elif page == "🔗 Bioaktive Relation Extraction":
     if st.session_state.last_result:
         render_relation_table(
             st.session_state.last_result,
