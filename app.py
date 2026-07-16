@@ -16,7 +16,7 @@ import plotly.express as px
 # KONFIGURASI APLIKASI
 # =========================================================
 APP_TITLE = "HyTBIONEX"
-PREFERRED_DATASET = "Dataset_herbal_tambah.xlsx"
+PREFERRED_DATASET = "Data set 20098+ Gambar.xlsx"
 ASSET_DIR = "assets"
 
 st.set_page_config(
@@ -750,70 +750,104 @@ def _is_missing_value(value):
     )
 
 
-def build_bioactive_summary(result):
+
+
+
+def _clean_sentence_value(value):
+    """Membersihkan nilai agar dapat dimasukkan ke dalam satu kalimat."""
+    value = str(value or "").strip()
+    value = re.sub(r"^\s*(?:1\)|2\)|3\)|[-•])\s*", "", value)
+    value = re.sub(r"\s+", " ", value)
+    return value.strip(" ,;:.-")
+
+
+def _capitalise_first(value):
+    value = _clean_sentence_value(value)
+    if not value:
+        return value
+    return value[0].upper() + value[1:]
+
+
+def build_therapeutic_conclusion(result):
     """
-    Membuat ringkasan utama kandungan bioaktif dari hasil input tanaman
-    atau hasil ekstraksi dokumen tanpa menambahkan informasi baru.
+    Membuat Keterangan secara langsung, tanpa frasa
+    'memiliki efek terapeutik' dan tanpa poin ringkasan artikel.
+
+    Contoh:
+    Jahe digunakan sebagai Antipiretik untuk membantu mengatasi demam.
     """
-    plant = str(result.get("Nama Tanaman", "")).strip()
-    latin = str(result.get("Nama Latin", "")).strip()
-    local_name = str(result.get("Nama Lokal/Daerah", "")).strip()
-    part = str(result.get("Bagian Tanaman", "")).strip()
-    compounds = str(result.get("Zat Bioaktif", "")).strip()
-    activity = str(result.get("Khasiat/Efek Terapeutik", "")).strip()
-    preparation = str(result.get("Cara Pengolahan", "")).strip()
-    dose = str(result.get("Komposisi/Dosis", "")).strip()
+    plant = _clean_sentence_value(
+        result.get("Nama Tanaman", "")
+    )
+    activity = _clean_sentence_value(
+        result.get("Khasiat/Efek Terapeutik", "")
+    )
+    disease = _clean_sentence_value(
+        result.get("Kategori Penyakit", "")
+    )
 
-    display_plant = plant
-    if _is_missing_value(display_plant) and not _is_missing_value(latin):
-        display_plant = latin
-    if _is_missing_value(display_plant):
-        display_plant = "Tanaman yang dianalisis"
+    if _is_missing_value(plant):
+        plant = "Tanaman tersebut"
 
-    identity_parts = []
-    if not _is_missing_value(latin) and clean_text(latin) != clean_text(display_plant):
-        identity_parts.append(f"nama Latin {latin}")
-    if (
-        not _is_missing_value(local_name)
-        and clean_text(local_name) not in {clean_text(display_plant), clean_text(latin)}
-    ):
-        identity_parts.append(f"nama lokal {local_name}")
+    activity_missing = _is_missing_value(activity)
+    disease_missing = _is_missing_value(disease)
 
-    identity_text = ""
-    if identity_parts:
-        identity_text = f" ({'; '.join(identity_parts)})"
-
-    sentences = []
-
-    if not _is_missing_value(compounds):
-        sentence = (
-            f"{display_plant}{identity_text} teridentifikasi mengandung "
-            f"senyawa bioaktif {compounds}"
-        )
-        if not _is_missing_value(part):
-            sentence += f" pada bagian {part}"
-        sentence += "."
-        sentences.append(sentence)
-    else:
-        sentences.append(
-            f"Senyawa bioaktif pada {display_plant}{identity_text} "
-            "belum berhasil teridentifikasi dari sumber yang diproses."
+    if not activity_missing and not disease_missing:
+        return (
+            f"{plant} digunakan sebagai {_capitalise_first(activity)} "
+            f"untuk membantu mengatasi {disease.lower()}."
         )
 
-    if not _is_missing_value(activity):
-        sentences.append(
-            f"Senyawa tersebut berkaitan dengan aktivitas biologis atau "
-            f"efek terapeutik {activity}."
+    if not activity_missing:
+        return (
+            f"{plant} digunakan sebagai {_capitalise_first(activity)}."
         )
 
-    if not _is_missing_value(preparation):
-        sentences.append(f"Ringkasan cara pengolahan: {preparation}.")
+    if not disease_missing:
+        return (
+            f"{plant} digunakan untuk membantu mengatasi "
+            f"{disease.lower()}."
+        )
 
-    if not _is_missing_value(dose):
-        sentences.append(f"Ringkasan komposisi atau dosis: {dose}.")
+    return (
+        f"Khasiat dan kategori penyakit yang berkaitan dengan "
+        f"{plant} belum terdeteksi."
+    )
 
-    return " ".join(sentences)
+def _extract_plant_name_from_document_context(document, latin_name=""):
+    """
+    Mengambil nama tanaman terutama dari judul artikel, bagian awal artikel,
+    dan nama file. Contoh judul yang memuat Kelor atau Kopi akan langsung
+    menghasilkan Nama Tanaman yang sesuai.
+    """
+    text = str(document.get("text", "") or "")
+    title = str(document.get("title", "") or "")
+    filename_stem = Path(str(document.get("filename", "") or "")).stem
 
+    header_lines = [
+        re.sub(r"\s+", " ", line).strip()
+        for line in text.splitlines()[:45]
+        if re.sub(r"\s+", " ", line).strip()
+    ]
+
+    candidates = [title]
+    candidates.extend(header_lines[:20])
+    candidates.append(" ".join(header_lines[:12]))
+    candidates.append(filename_stem)
+
+    for candidate in candidates:
+        if not candidate:
+            continue
+
+        name = _plant_name_from_title_and_assets(candidate)
+        if name:
+            return name
+
+        name = _extract_plant_name_from_title(candidate, latin_name)
+        if name:
+            return name
+
+    return ""
 
 def _extract_plant_and_local_names(text, latin_name, article_title=""):
     """
@@ -965,31 +999,16 @@ def _clean_compound_candidate(candidate):
     return candidate
 
 
+
 def _extract_bioactive_compounds(text):
+    """
+    Mengambil hanya senyawa bioaktif yang paling relevan dari artikel.
+    Hasil dibatasi maksimal delapan senyawa agar tidak menjadi uraian panjang.
+    """
+    text = str(text or "")
     compounds = []
-    cue_patterns = [
-        r"(?:mengandung|kandungan kimia|senyawa bioaktif|senyawa aktif|fitokimia)\s*(?:adalah|yaitu|berupa|meliputi|:)?\s*([^.;\n]{3,260})",
-        r"(?:contains?|bioactive compounds?|active compounds?|phytochemicals?|chemical constituents?)\s*(?:include(?:s)?|are|is|such as|:)?\s*([^.;\n]{3,260})",
-    ]
-
-    for pattern in cue_patterns:
-        for match in re.finditer(pattern, text, flags=re.IGNORECASE):
-            segment = match.group(1)
-            segment = re.split(
-                r"\b(?:which|that|yang|with|dengan|showed|menunjukkan|possess|memiliki)\b",
-                segment,
-                maxsplit=1,
-                flags=re.IGNORECASE,
-            )[0]
-
-            for item in re.split(r",|;|\band\b|\bdan\b", segment, flags=re.IGNORECASE):
-                cleaned = _clean_compound_candidate(item)
-                if cleaned:
-                    compounds.append(cleaned)
 
     known_compounds = [
-        "flavonoid", "alkaloid", "saponin", "tannin", "tanin", "terpenoid",
-        "steroid", "phenolic", "fenolik", "polyphenol", "polifenol",
         "quercetin", "kaempferol", "curcumin", "gingerol", "shogaol",
         "eugenol", "citronellal", "citronellol", "geraniol", "limonene",
         "linalool", "menthol", "thymol", "carvacrol", "cinnamaldehyde",
@@ -1000,15 +1019,85 @@ def _extract_bioactive_compounds(text):
         "ascorbic acid", "vitamin c", "oleanolic acid", "ursolic acid",
         "andrographolide", "asiaticoside", "madecassoside", "allicin",
         "piperine", "capsaicin", "mangiferin", "xanthone", "acetogenin",
-        "glycoside", "glikosida", "essential oil", "minyak atsiri",
+        "flavonoid", "alkaloid", "saponin", "tannin", "tanin",
+        "terpenoid", "steroid", "phenolic", "fenolik", "polyphenol",
+        "polifenol", "glycoside", "glikosida", "essential oil",
+        "minyak atsiri",
     ]
 
+    cue_terms = [
+        "senyawa bioaktif", "senyawa aktif", "kandungan kimia",
+        "mengandung", "bioactive compound", "active compound",
+        "chemical constituent", "phytochemical", "contains",
+    ]
+
+    # Prioritaskan senyawa yang muncul pada kalimat yang jelas membahas
+    # kandungan bioaktif.
+    relevant_sentences = []
+    for sentence in _sentences(text):
+        lower = sentence.casefold()
+        if any(cue in lower for cue in cue_terms):
+            relevant_sentences.append(sentence)
+        if len(relevant_sentences) >= 12:
+            break
+
+    relevant_text = " ".join(relevant_sentences)
+
     for compound in known_compounds:
-        if re.search(rf"(?<!\w){re.escape(compound)}(?!\w)", text, re.IGNORECASE):
+        if relevant_text and re.search(
+            rf"(?<!\w){re.escape(compound)}(?!\w)",
+            relevant_text,
+            re.IGNORECASE,
+        ):
             compounds.append(compound)
 
-    return ", ".join(_unique_preserve_order(compounds)[:15])
+    # Ambil daftar setelah kata pemicu jika nama senyawanya belum tercakup
+    # dalam kamus.
+    cue_patterns = [
+        r"(?:senyawa bioaktif|senyawa aktif|kandungan kimia|mengandung)"
+        r"\s*(?:adalah|yaitu|berupa|meliputi|:)?\s*([^.;\n]{3,180})",
+        r"(?:bioactive compounds?|active compounds?|chemical constituents?|"
+        r"phytochemicals?|contains?)"
+        r"\s*(?:include(?:s)?|are|is|such as|:)?\s*([^.;\n]{3,180})",
+    ]
 
+    for pattern in cue_patterns:
+        for match in re.finditer(pattern, text, flags=re.IGNORECASE):
+            segment = re.split(
+                r"\b(?:which|that|yang|with|dengan|showed|menunjukkan|"
+                r"possess|memiliki|activity|aktivitas)\b",
+                match.group(1),
+                maxsplit=1,
+                flags=re.IGNORECASE,
+            )[0]
+
+            for item in re.split(
+                r",|;|\band\b|\bdan\b",
+                segment,
+                flags=re.IGNORECASE,
+            ):
+                cleaned = _clean_compound_candidate(item)
+                if cleaned:
+                    compounds.append(cleaned)
+
+            if len(compounds) >= 8:
+                break
+
+        if len(compounds) >= 8:
+            break
+
+    # Fallback bila kalimat pemicu tidak ditemukan.
+    if not compounds:
+        compact_text = text[:16000]
+        for compound in known_compounds:
+            if re.search(
+                rf"(?<!\w){re.escape(compound)}(?!\w)",
+                compact_text,
+                re.IGNORECASE,
+            ):
+                compounds.append(compound)
+
+    return ", ".join(_unique_preserve_order(compounds)[:8])
 
 def _extract_biological_activities(text):
     activity_map = {
@@ -1054,6 +1143,97 @@ def _extract_biological_activities(text):
 
     return ", ".join(_unique_preserve_order(found)[:12])
 
+
+
+def _extract_disease_category(text):
+    """
+    Mengambil kategori penyakit atau kondisi kesehatan yang disebutkan
+    secara langsung dalam dokumen. Hasil dibuat singkat dan unik.
+    """
+    labelled = _capture_label_value(
+        text,
+        [
+            "kategori penyakit",
+            "nama penyakit",
+            "penyakit",
+            "disease category",
+            "disease",
+            "health condition",
+            "medical condition",
+        ],
+        max_length=180,
+    )
+
+    disease_map = {
+        "Gangguan Pencernaan": [
+            "sakit perut", "nyeri perut", "gangguan pencernaan",
+            "gastritis", "maag", "diare", "disentri", "kembung",
+            "mual", "ulkus lambung", "peptic ulcer",
+        ],
+        "Diabetes": [
+            "diabetes", "diabetes mellitus", "hiperglikemia",
+            "hyperglycemia", "gula darah",
+        ],
+        "Hipertensi": [
+            "hipertensi", "hypertension", "darah tinggi",
+        ],
+        "Peradangan": [
+            "inflamasi", "inflammation", "radang",
+        ],
+        "Infeksi Bakteri": [
+            "infeksi bakteri", "bacterial infection",
+        ],
+        "Infeksi Jamur": [
+            "infeksi jamur", "fungal infection",
+        ],
+        "Kanker": [
+            "kanker", "cancer", "tumor",
+        ],
+        "Demam": [
+            "demam", "fever",
+        ],
+        "Nyeri": [
+            "nyeri", "pain", "sakit kepala", "headache",
+        ],
+        "Penyakit Hati": [
+            "penyakit hati", "liver disease", "hepatitis",
+        ],
+        "Penyakit Kulit": [
+            "penyakit kulit", "skin disease", "dermatitis",
+        ],
+        "Gangguan Pernapasan": [
+            "batuk", "cough", "asma", "asthma",
+            "gangguan pernapasan", "respiratory",
+        ],
+        "Luka": [
+            "luka", "wound",
+        ],
+    }
+
+    found = []
+
+    if labelled:
+        for item in re.split(
+            r",|;|\band\b|\bdan\b",
+            labelled,
+            flags=re.IGNORECASE,
+        ):
+            item = re.sub(r"\s+", " ", item).strip(" ,;:.")
+            if 2 <= len(item) <= 80:
+                found.append(item)
+
+    for canonical, variants in disease_map.items():
+        if any(
+            re.search(
+                rf"(?<!\w){re.escape(variant)}(?!\w)",
+                text,
+                flags=re.IGNORECASE,
+            )
+            for variant in variants
+        ):
+            found.append(canonical)
+
+    return ", ".join(_unique_preserve_order(found)[:8])
 
 def _remove_article_citations(text):
     """Membersihkan sitasi artikel tanpa mengubah angka dosis penting."""
@@ -1149,150 +1329,218 @@ def _extract_section_text(text, headings, max_chars=2200):
     return "\n".join(collected)
 
 
-def _rank_and_summarise_points(candidates, cue_terms, max_points=2):
-    """Memilih poin paling relevan dari artikel tanpa menambah informasi baru."""
+
+def _rank_and_summarise_points(candidates, cue_terms, max_points=1):
+    """
+    Memilih satu nilai paling relevan dari artikel.
+    Hasil tidak diberi nomor dan tidak dibuat sebagai poin ringkasan.
+    """
     scored = []
 
     for order, candidate in enumerate(candidates):
-        point = _compact_article_point(candidate)
-        if not point:
+        value = _compact_article_point(candidate)
+        if not value:
             continue
 
-        lower = point.casefold()
-        score = sum(2 for cue in cue_terms if cue.casefold() in lower)
-        score += 2 if re.search(r"\b\d+(?:[.,]\d+)?\s*(?:mg|g|kg|µg|μg|mcg|ml|mL|l|L|%|ppm|menit|minute|minutes|jam|hour|hours)\b", point, re.IGNORECASE) else 0
-        score += 1 if 35 <= len(point) <= 180 else 0
+        value = re.sub(r"^\s*(?:1\)|2\)|3\)|[-•])\s*", "", value)
+        lower = value.casefold()
+
+        score = sum(
+            2 for cue in cue_terms
+            if cue.casefold() in lower
+        )
+        score += 2 if re.search(
+            r"\b\d+(?:[.,]\d+)?\s*"
+            r"(?:mg|g|kg|µg|μg|mcg|ml|mL|l|L|%|ppm|"
+            r"menit|minute|minutes|jam|hour|hours)\b",
+            value,
+            re.IGNORECASE,
+        ) else 0
+        score += 1 if 20 <= len(value) <= 160 else 0
         score -= order * 0.01
-        scored.append((score, order, point))
 
-    scored.sort(key=lambda item: (-item[0], item[1]))
+        scored.append((score, order, value))
 
-    selected = []
-    seen = set()
-    for _, _, point in scored:
-        key = clean_text(point)
-        if not key or key in seen:
-            continue
-        seen.add(key)
-        selected.append(point)
-        if len(selected) >= max_points:
-            break
-
-    if not selected:
+    if not scored:
         return ""
 
-    return "; ".join(f"{index + 1}) {point}" for index, point in enumerate(selected))
+    scored.sort(key=lambda item: (-item[0], item[1]))
+    return scored[0][2]
+
 
 
 def _extract_preparation(text):
     """
-    Mengambil cara pengolahan langsung dari artikel lalu meringkasnya
-    menjadi maksimal dua poin penting.
+    Mengambil cara pengolahan secara langsung dari artikel.
+    Hanya satu nilai utama yang ditampilkan, tanpa nomor atau poin ringkasan.
     """
     labels = [
-        "cara pengolahan", "cara pemakaian", "cara pembuatan",
-        "preparation", "processing method", "method of preparation",
-        "preparation of extract", "extract preparation", "sample preparation",
+        "cara pengolahan",
+        "cara pemakaian",
+        "cara pembuatan",
+        "preparation",
+        "processing method",
+        "method of preparation",
+        "preparation of extract",
+        "extract preparation",
     ]
+
     keywords = [
-        "direbus", "rebus", "diseduh", "seduh", "ditumbuk", "tumbuk",
-        "digiling", "dikeringkan", "dipotong", "dihaluskan", "diekstraksi",
-        "maserasi", "infusa", "dekokta", "decoction", "infusion", "boiled",
-        "brewed", "crushed", "ground", "dried", "macerated", "extracted",
-        "soaked", "powdered", "filtered", "disaring", "evaporated",
-        "diuapkan", "heated", "dipanaskan",
+        "direbus", "rebus", "diseduh", "seduh",
+        "ditumbuk", "tumbuk", "digiling", "dikeringkan",
+        "dipotong", "dihaluskan", "diekstraksi",
+        "maserasi", "infusa", "dekokta", "decoction",
+        "infusion", "boiled", "brewed", "crushed",
+        "ground", "dried", "macerated", "extracted",
+        "soaked", "powdered", "filtered", "disaring",
+        "evaporated", "diuapkan", "heated", "dipanaskan",
     ]
 
-    candidates = []
-
-    labelled = _capture_label_value(text, labels, max_length=420)
+    labelled = _capture_label_value(
+        text,
+        labels,
+        max_length=150,
+    )
     if labelled:
-        candidates.append(labelled)
-
-    section_text = _extract_section_text(text, labels)
-    if section_text:
-        candidates.extend(_sentences(section_text))
+        return _clean_sentence_value(
+            _compact_article_point(labelled, max_chars=120)
+        )
 
     for sentence in _sentences(text):
         lower = sentence.casefold()
-        if any(keyword.casefold() in lower for keyword in keywords):
-            candidates.append(sentence)
-        if len(candidates) >= 15:
-            break
 
-    return _rank_and_summarise_points(
-        candidates,
-        cue_terms=keywords,
-        max_points=2,
-    )
+        if not any(
+            keyword.casefold() in lower
+            for keyword in keywords
+        ):
+            continue
+
+        value = _compact_article_point(
+            sentence,
+            max_chars=120,
+        )
+        value = _clean_sentence_value(value)
+
+        if value:
+            return value
+
+    return ""
+
+
 
 def _extract_composition_dose(text):
     """
-    Mengambil komposisi, konsentrasi, atau dosis langsung dari artikel
-    lalu meringkasnya menjadi maksimal dua poin penting.
+    Mengambil satu komposisi, konsentrasi, atau dosis secara langsung.
+    Hasil tidak diberi nomor dan tidak dibuat sebagai poin ringkasan.
     """
     labels = [
-        "komposisi/dosis", "komposisi", "dosis", "dose", "dosage",
-        "concentration", "konsentrasi", "formulation", "composition",
-        "extract concentration", "treatment dose",
+        "komposisi/dosis",
+        "komposisi",
+        "dosis",
+        "dose",
+        "dosage",
+        "concentration",
+        "konsentrasi",
+        "formulation",
+        "composition",
+        "extract concentration",
+        "treatment dose",
     ]
+
     cue_terms = [
-        "dosis", "dose", "dosage", "komposisi", "composition",
-        "konsentrasi", "concentration", "ekstrak", "extract",
-        "larutan", "solution", "diberikan", "administered",
+        "dosis", "dose", "dosage",
+        "komposisi", "composition",
+        "konsentrasi", "concentration",
+        "ekstrak", "extract",
+        "larutan", "solution",
+        "diberikan", "administered",
         "formulasi", "formulation",
     ]
 
-    candidates = []
-
-    labelled = _capture_label_value(text, labels, max_length=420)
-    if labelled:
-        candidates.append(labelled)
-
-    section_text = _extract_section_text(text, labels)
-    if section_text:
-        candidates.extend(_sentences(section_text))
-
     unit_pattern = re.compile(
-        r"\b\d+(?:[.,]\d+)?\s*(?:mg|g|kg|µg|μg|mcg|mL|ml|L|%|ppm|mol|mM|µM|μM)\b",
+        r"\b\d+(?:[.,]\d+)?\s*"
+        r"(?:mg|g|kg|µg|μg|mcg|mL|ml|L|%|ppm|"
+        r"mol|mM|µM|μM)"
+        r"(?:\s*/\s*(?:kg|mL|ml|L))?\b",
         flags=re.IGNORECASE,
     )
 
+    labelled = _capture_label_value(
+        text,
+        labels,
+        max_length=150,
+    )
+    if labelled:
+        return _clean_sentence_value(
+            _compact_article_point(labelled, max_chars=110)
+        )
+
     for sentence in _sentences(text):
         lower = sentence.casefold()
-        has_cue = any(cue.casefold() in lower for cue in cue_terms)
-        if unit_pattern.search(sentence) and has_cue:
-            candidates.append(sentence)
-        elif has_cue and any(term in lower for term in ("ratio", "perbandingan", "formula", "formulasi")):
-            candidates.append(sentence)
-        if len(candidates) >= 18:
-            break
 
-    return _rank_and_summarise_points(
-        candidates,
-        cue_terms=cue_terms,
-        max_points=2,
-    )
+        if not unit_pattern.search(sentence):
+            continue
+
+        if not any(
+            cue.casefold() in lower
+            for cue in cue_terms
+        ):
+            continue
+
+        value = _compact_article_point(
+            sentence,
+            max_chars=110,
+        )
+        value = _clean_sentence_value(value)
+
+        if value:
+            return value
+
+    return ""
+
 
 def extract_entities_from_document(document):
     """
-    Mengekstrak seluruh entitas langsung dari isi dokumen.
-    Dataset Excel tidak digunakan pada mode Upload Dokumen.
+    Mengekstrak entitas langsung dari dokumen tanpa menggunakan Excel.
 
-    Sumber Data hanya berisi judul artikel, nama penulis, dan tahun.
+    Hasil mengikuti struktur kolom utama dataset:
+    Nama_Tanaman, Nama_Lokal/Daerah, Nama_Latin, Bagian_Tanaman,
+    Zat Bioaktif, Khasiat_Efek_Terapeutik, Kategori_Penyakit,
+    Komposisi/Dosis, Cara_Pengolahan, Keterangan, dan Sumber_Data.
     """
     text = document.get("text", "")
     missing = "Tidak disebutkan dalam dokumen"
 
     latin_name = _extract_latin_name(text)
+
     plant_name, local_name = _extract_plant_and_local_names(
         text,
         latin_name,
         article_title=document.get("title", ""),
     )
+
+    title_plant_name = _extract_plant_name_from_document_context(
+        document,
+        latin_name,
+    )
+
+    if title_plant_name:
+        plant_name = title_plant_name
+
+    if not plant_name and latin_name:
+        plant_name = latin_name
+
+    if (
+        not local_name
+        and plant_name
+        and clean_text(plant_name) != clean_text(latin_name)
+    ):
+        local_name = plant_name
+
     plant_parts = _extract_plant_parts(text)
     compounds = _extract_bioactive_compounds(text)
     activities = _extract_biological_activities(text)
+    disease_category = _extract_disease_category(text)
     preparation = _extract_preparation(text)
     composition_dose = _extract_composition_dose(text)
 
@@ -1322,69 +1570,131 @@ def extract_entities_from_document(document):
         "Bagian Tanaman": _first_nonempty(plant_parts, missing),
         "Zat Bioaktif": _first_nonempty(compounds, missing),
         "Khasiat/Efek Terapeutik": _first_nonempty(activities, missing),
-        "Cara Pengolahan": _first_nonempty(preparation, missing),
+        "Kategori Penyakit": _first_nonempty(disease_category, missing),
         "Komposisi/Dosis": _first_nonempty(composition_dose, missing),
+        "Cara Pengolahan": _first_nonempty(preparation, missing),
+        "Keterangan": missing,
         "Sumber Data": source_data,
-        "Kategori Penyakit": missing,
         "Gambar": "Belum terdeteksi",
-        # Metadata internal untuk pencarian gambar; tidak dibuat sebagai kotak output.
         "Judul Artikel": article_title,
         "Penulis Artikel": authors,
         "Tahun Artikel": year,
         "Mode Ekstraksi": "Dokumen langsung tanpa Excel",
     }
-    result["Ringkasan Bioaktif"] = build_bioactive_summary(result)
+
+    result["Keterangan"] = build_therapeutic_conclusion(result)
+
     return result
 
 
+
 def get_column_map(df):
+    """
+    Memetakan variasi nama kolom Excel ke atribut internal aplikasi.
+    Kandidat pertama mengikuti judul kolom dataset pengguna.
+    """
     return {
         "nama": find_col(df, [
-            "Nama Tanaman", "Nama_Tanaman", "Tanaman", "Nama Herbal", "Nama"
-        ]),
-        "latin": find_col(df, [
-            "Nama Latin", "Nama_Latin", "Latin", "Scientific Name"
+            "Nama_Tanaman",
+            "Nama Tanaman",
+            "Tanaman",
+            "Nama Herbal",
+            "Nama",
         ]),
         "lokal": find_col(df, [
-            "Nama Lokal/Daerah", "Nama Lokal", "Nama Daerah",
-            "Bahasa Daerah", "Bahasa_Daerah", "Sinonim"
+            "Nama_Lokal/ Daerah",
+            "Nama_Lokal/Daerah",
+            "Nama Lokal/ Daerah",
+            "Nama Lokal/Daerah",
+            "Nama Lokal",
+            "Nama Daerah",
+            "Bahasa Daerah",
+            "Bahasa_Daerah",
+            "Sinonim",
+        ]),
+        "latin": find_col(df, [
+            "Nama_Latin",
+            "Nama Latin",
+            "Latin",
+            "Scientific Name",
         ]),
         "bagian": find_col(df, [
-            "Bagian Tanaman", "Bagian Digunakan", "Bagian_Digunakan",
-            "Bagian yang Digunakan", "Bagian"
+            "Bagian_Tanaman",
+            "Bagian Tanaman",
+            "Bagian_Digunakan",
+            "Bagian Digunakan",
+            "Bagian yang Digunakan",
+            "Bagian",
         ]),
         "senyawa": find_col(df, [
-            "Zat Bioaktif", "Senyawa Bioaktif", "Senyawa_Bioaktif",
-            "Compound", "Senyawa", "Kandungan", "Kandungan Kimia",
-            "Komposisi/Kandungan Kimia"
+            "Zat Bioaktif",
+            "Zat_Bioaktif",
+            "Senyawa Bioaktif",
+            "Senyawa_Bioaktif",
+            "Compound",
+            "Senyawa",
+            "Kandungan",
+            "Kandungan Kimia",
+            "Komposisi/Kandungan Kimia",
         ]),
         "khasiat": find_col(df, [
-            "Khasiat/Efek Terapeutik", "Khasiat", "Manfaat",
-            "Benefit", "Biological Activity", "Biological_Activity",
-            "Efek Terapeutik"
-        ]),
-        "pengolahan": find_col(df, [
-            "Cara Pengolahan", "Cara_Pengolahan", "Pengolahan",
-            "Cara Pemakaian", "Preparation"
-        ]),
-        "dosis": find_col(df, [
-            "Komposisi/Dosis", "Komposisi /Dosis", "Dosis",
-            "Komposisi", "Dose"
-        ]),
-        "sumber": find_col(df, [
-            "Sumber Data", "Sumber_Data", "Sumber", "Referensi",
-            "Source"
-        ]),
-        "gambar": find_col(df, [
-            "Gambar", "Image", "Foto", "File Gambar",
-            "Path Gambar", "Nama File Gambar"
+            "Khasiat_Efek_Terapeutik",
+            "Khasiat/Efek Terapeutik",
+            "Khasiat Efek Terapeutik",
+            "Khasiat",
+            "Manfaat",
+            "Benefit",
+            "Biological Activity",
+            "Biological_Activity",
+            "Efek Terapeutik",
         ]),
         "penyakit": find_col(df, [
-            "Kategori Penyakit", "Penyakit", "Disease",
-            "Nama Penyakit"
+            "Kategori_Penyakit",
+            "Kategori Penyakit",
+            "Nama Penyakit",
+            "Penyakit",
+            "Disease",
+        ]),
+        "dosis": find_col(df, [
+            "Komposisi /Dosis",
+            "Komposisi/Dosis",
+            "Komposisi_Dosis",
+            "Dosis",
+            "Komposisi",
+            "Dose",
+        ]),
+        "pengolahan": find_col(df, [
+            "Cara_Pengolahan",
+            "Cara Pengolahan",
+            "Pengolahan",
+            "Cara Pemakaian",
+            "Preparation",
+        ]),
+        "keterangan": find_col(df, [
+            "Keterangan",
+            "Catatan",
+            "Deskripsi",
+            "Informasi Tambahan",
+        ]),
+        "sumber": find_col(df, [
+            "Sumber_Data",
+            "Sumber Data",
+            "Sumber",
+            "Referensi",
+            "Source",
+        ]),
+        "gambar": find_col(df, [
+            "Gambar",
+            "Image",
+            "Foto",
+            "File Gambar",
+            "Path Gambar",
+            "Nama File Gambar",
         ]),
         "benefit": find_col(df, [
-            "Benefit", "Manfaat", "Deskripsi Manfaat"
+            "Benefit",
+            "Manfaat",
+            "Deskripsi Manfaat",
         ]),
     }
 
@@ -1449,37 +1759,45 @@ def find_best_match(df, search_text):
     return None, "Tidak ditemukan kecocokan tanaman pada dataset.", 0
 
 
+
 def extract_result(row, input_text, df):
     columns = get_column_map(df)
 
     if row is None:
-        return {
+        result = {
             "Nama Tanaman": input_text.strip() or "Belum terdeteksi",
-            "Nama Latin": "Belum terdeteksi",
             "Nama Lokal/Daerah": "Belum terdeteksi",
+            "Nama Latin": "Belum terdeteksi",
             "Bagian Tanaman": "Belum terdeteksi",
             "Zat Bioaktif": "Belum terdeteksi",
             "Khasiat/Efek Terapeutik": "Belum terdeteksi",
-            "Cara Pengolahan": "Belum terdeteksi",
-            "Komposisi/Dosis": "Belum terdeteksi",
-            "Sumber Data": "Belum terdeteksi",
             "Kategori Penyakit": "Belum terdeteksi",
+            "Komposisi/Dosis": "Belum terdeteksi",
+            "Cara Pengolahan": "Belum terdeteksi",
+            "Keterangan": "Belum terdeteksi",
+            "Sumber Data": "Belum terdeteksi",
             "Gambar": "Belum terdeteksi",
         }
+        result["Keterangan"] = build_therapeutic_conclusion(result)
+        return result
 
-    return {
+    result = {
         "Nama Tanaman": value_from_row(row, columns["nama"]),
-        "Nama Latin": value_from_row(row, columns["latin"]),
         "Nama Lokal/Daerah": value_from_row(row, columns["lokal"]),
+        "Nama Latin": value_from_row(row, columns["latin"]),
         "Bagian Tanaman": value_from_row(row, columns["bagian"]),
         "Zat Bioaktif": value_from_row(row, columns["senyawa"]),
         "Khasiat/Efek Terapeutik": value_from_row(row, columns["khasiat"]),
-        "Cara Pengolahan": value_from_row(row, columns["pengolahan"]),
-        "Komposisi/Dosis": value_from_row(row, columns["dosis"]),
-        "Sumber Data": value_from_row(row, columns["sumber"]),
         "Kategori Penyakit": value_from_row(row, columns["penyakit"]),
+        "Komposisi/Dosis": value_from_row(row, columns["dosis"]),
+        "Cara Pengolahan": value_from_row(row, columns["pengolahan"]),
+        "Keterangan": value_from_row(row, columns["keterangan"]),
+        "Sumber Data": value_from_row(row, columns["sumber"]),
         "Gambar": value_from_row(row, columns["gambar"]),
     }
+
+    result["Keterangan"] = build_therapeutic_conclusion(result)
+    return result
 
 
 def find_plant_image(result):
@@ -1587,7 +1905,7 @@ def run_extraction(text_input, uploaded_file, df, dataset_status):
                 and _is_missing_value(result.get("Nama Tanaman"))
             ):
                 result["Nama Tanaman"] = text_input.strip()
-                result["Ringkasan Bioaktif"] = build_bioactive_summary(result)
+                result["Keterangan"] = build_therapeutic_conclusion(result)
 
             extraction_source = "Dokumen langsung — dataset Excel tidak digunakan."
             match_status = (
@@ -1613,10 +1931,11 @@ def run_extraction(text_input, uploaded_file, df, dataset_status):
                 "Komposisi/Dosis": "Tidak terdeteksi",
                 "Sumber Data": source_data,
                 "Kategori Penyakit": "Tidak terdeteksi",
+                "Keterangan": "Teks dokumen tidak tersedia untuk diekstrak.",
                 "Gambar": "Belum terdeteksi",
                 "Mode Ekstraksi": "Dokumen langsung tanpa Excel",
             }
-            result["Ringkasan Bioaktif"] = build_bioactive_summary(result)
+            result["Keterangan"] = build_therapeutic_conclusion(result)
             extraction_source = "Dokumen langsung — dataset Excel tidak digunakan."
             match_status = (
                 "Teks dokumen tidak tersedia untuk diekstrak. "
@@ -1629,7 +1948,7 @@ def run_extraction(text_input, uploaded_file, df, dataset_status):
         row, match_status, score = find_best_match(df, text_input)
         result = extract_result(row, text_input, df)
         result["Mode Ekstraksi"] = "Pencocokan input dengan dataset Excel"
-        result["Ringkasan Bioaktif"] = build_bioactive_summary(result)
+        result["Keterangan"] = build_therapeutic_conclusion(result)
         extraction_source = dataset_status
 
     image_path = find_plant_image(result)
@@ -1896,30 +2215,32 @@ def make_kg_graph(result):
     return fig
 
 
+
 def build_relation_dataframe(result):
-    """Membuat triplet relasi dengan senyawa bioaktif sebagai fokus utama."""
+    """Membuat triplet relasi dengan Zat Bioaktif sebagai fokus utama."""
     plant = result.get("Nama Tanaman", "Belum terdeteksi")
     latin = result.get("Nama Latin", "Belum terdeteksi")
     local_name = result.get("Nama Lokal/Daerah", "Belum terdeteksi")
     plant_part = result.get("Bagian Tanaman", "Belum terdeteksi")
     compound = result.get("Zat Bioaktif", "Belum terdeteksi")
     activity = result.get("Khasiat/Efek Terapeutik", "Belum terdeteksi")
+    disease = result.get("Kategori Penyakit", "Belum terdeteksi")
     preparation = result.get("Cara Pengolahan", "Belum terdeteksi")
     dose = result.get("Komposisi/Dosis", "Belum terdeteksi")
+    note = result.get("Keterangan", "Belum terdeteksi")
     source = result.get("Sumber Data", "Belum terdeteksi")
 
     relations = [
-        # Relasi utama penelitian: tanaman → senyawa → aktivitas biologis
-        [plant, "mengandung senyawa bioaktif", compound],
-        [compound, "memiliki aktivitas biologis", activity],
+        [plant, "mengandung zat bioaktif", compound],
+        [compound, "memiliki khasiat/efek terapeutik", activity],
+        [activity, "terkait dengan kategori penyakit", disease],
         [compound, "ditemukan pada bagian tanaman", plant_part],
         [compound, "didukung oleh sumber data", source],
-
-        # Relasi pendukung identitas dan pemanfaatan tanaman
         [plant, "memiliki nama latin", latin],
         [plant, "memiliki nama lokal/daerah", local_name],
         [plant, "diolah dengan cara", preparation],
-        [plant, "memiliki dosis/komposisi", dose],
+        [plant, "memiliki komposisi/dosis", dose],
+        [plant, "memiliki keterangan", note],
     ]
 
     return pd.DataFrame(
@@ -1962,6 +2283,7 @@ def find_rows_by_plant(df, plant_name):
     return df.loc[mask].copy()
 
 
+
 def merge_rows_to_result(rows, df):
     if rows.empty:
         return extract_result(None, "", df)
@@ -1971,15 +2293,16 @@ def merge_rows_to_result(rows, df):
 
     mapping = {
         "Nama Tanaman": "nama",
-        "Nama Latin": "latin",
         "Nama Lokal/Daerah": "lokal",
+        "Nama Latin": "latin",
         "Bagian Tanaman": "bagian",
         "Zat Bioaktif": "senyawa",
         "Khasiat/Efek Terapeutik": "khasiat",
-        "Cara Pengolahan": "pengolahan",
-        "Komposisi/Dosis": "dosis",
-        "Sumber Data": "sumber",
         "Kategori Penyakit": "penyakit",
+        "Komposisi/Dosis": "dosis",
+        "Cara Pengolahan": "pengolahan",
+        "Keterangan": "keterangan",
+        "Sumber Data": "sumber",
         "Gambar": "gambar",
     }
 
@@ -1993,7 +2316,8 @@ def merge_rows_to_result(rows, df):
         values = [
             str(value).strip()
             for value in rows[column].tolist()
-            if str(value).strip() and str(value).strip().lower() != "nan"
+            if str(value).strip()
+            and str(value).strip().lower() not in {"nan", "none"}
         ]
 
         unique_values = list(dict.fromkeys(values))
@@ -2003,6 +2327,7 @@ def merge_rows_to_result(rows, df):
             else "Belum terdeteksi"
         )
 
+    result["Keterangan"] = build_therapeutic_conclusion(result)
     return result
 
 
@@ -2085,536 +2410,356 @@ def calculate_similarity_table(df, selected_plant):
     )
 
 
+
+RECOMMENDATION_TERM_MAP = {
+    "sakit perut": [
+        "sakit perut", "nyeri perut", "gangguan pencernaan", "pencernaan",
+        "maag", "gastritis", "diare", "disentri", "kembung", "mual",
+        "gastroprotektif", "gastroprotective", "karminatif", "carminative",
+        "antidiare", "antidiarrheal", "antiulser", "antiulcer",
+        "antispasmodik", "antispasmodic",
+    ],
+    "maag": [
+        "maag", "gastritis", "asam lambung", "nyeri lambung",
+        "gastroprotektif", "gastroprotective", "antiulser", "antiulcer",
+    ],
+    "diare": [
+        "diare", "antidiare", "antidiarrheal", "disentri",
+        "gangguan pencernaan",
+    ],
+    "kembung": [
+        "kembung", "karminatif", "carminative", "gangguan pencernaan",
+        "mual",
+    ],
+    "batuk": [
+        "batuk", "antitusif", "antitussive", "ekspektoran", "expectorant",
+        "pelega tenggorokan",
+    ],
+    "demam": [
+        "demam", "antipiretik", "antipyretic", "penurun panas",
+    ],
+    "sakit kepala": [
+        "sakit kepala", "nyeri kepala", "analgesik", "analgesic",
+        "antinyeri",
+    ],
+    "darah tinggi": [
+        "darah tinggi", "hipertensi", "antihipertensi", "antihypertensive",
+    ],
+    "hipertensi": [
+        "hipertensi", "darah tinggi", "antihipertensi", "antihypertensive",
+    ],
+    "diabetes": [
+        "diabetes", "antidiabetes", "antidiabetic", "hipoglikemik",
+        "hypoglycemic", "gula darah",
+    ],
+    "gula darah": [
+        "gula darah", "diabetes", "antidiabetes", "antidiabetic",
+        "hipoglikemik", "hypoglycemic",
+    ],
+    "radang": [
+        "radang", "inflamasi", "antiinflamasi", "anti inflammatory",
+        "anti-inflammatory",
+    ],
+    "anti inflamasi": [
+        "anti inflamasi", "antiinflamasi", "anti inflammatory",
+        "anti-inflammatory",
+    ],
+    "nyeri sendi": [
+        "nyeri sendi", "rematik", "asam urat", "analgesik",
+        "antiinflamasi",
+    ],
+    "luka": [
+        "luka", "penyembuhan luka", "wound healing", "antiseptik",
+        "antimikroba",
+    ],
+}
+
+
+def expand_recommendation_terms(keyword):
+    """Memperluas keluhan awam menjadi istilah khasiat/penyakit pada dataset."""
+    keyword_clean = clean_text(keyword)
+    if not keyword_clean:
+        return []
+
+    expanded = [keyword_clean]
+
+    for trigger, terms in RECOMMENDATION_TERM_MAP.items():
+        trigger_clean = clean_text(trigger)
+        if trigger_clean in keyword_clean or keyword_clean in trigger_clean:
+            expanded.extend(clean_text(term) for term in terms)
+
+    expanded.extend([
+        keyword_clean.replace("anti ", "anti"),
+        keyword_clean.replace("-", " "),
+    ])
+
+    return _unique_preserve_order(expanded)
+
+
+def _series_or_default(frame, column, default=""):
+    if column and column in frame.columns:
+        return (
+            frame[column]
+            .astype(str)
+            .replace({"nan": "", "None": "", "NaN": ""})
+            .fillna("")
+            .str.strip()
+        )
+
+    return pd.Series(
+        [default] * len(frame),
+        index=frame.index,
+        dtype="object",
+    )
+
+
+def _combine_benefit_values(benefit_value, effect_value):
+    benefit = str(benefit_value or "").strip()
+    effect = str(effect_value or "").strip()
+    invalid = {"", "nan", "none", "belum terdeteksi"}
+
+    benefit_ok = benefit.casefold() not in invalid
+    effect_ok = effect.casefold() not in invalid
+
+    if benefit_ok and effect_ok:
+        if clean_text(benefit) == clean_text(effect):
+            return benefit
+        return f"{effect} | {benefit}"
+
+    if benefit_ok:
+        return benefit
+
+    if effect_ok:
+        return effect
+
+    return "Belum terdeteksi"
+
+
+def _merge_unique_recommendation_values(series, max_items=4):
+    values = []
+
+    for value in series:
+        value = re.sub(r"\s+", " ", str(value or "")).strip(" |,;")
+        if value.casefold() in {
+            "", "nan", "none", "belum terdeteksi",
+            "tidak disebutkan dalam dokumen",
+        }:
+            continue
+        values.append(value)
+
+    values = _unique_preserve_order(values)
+
+    if not values:
+        return "Belum terdeteksi"
+
+    return " | ".join(values[:max_items])
+
+
+def _prepare_recommendation_dataframe(df, columns):
+    """
+    Mengisi identitas tanaman yang kosong akibat format Excel bertingkat.
+    Pengisian dilakukan per sheet agar nama tanaman tidak tertukar.
+    """
+    working = df.copy()
+
+    identity_columns = [
+        columns.get("nama"),
+        columns.get("latin"),
+        columns.get("lokal"),
+        columns.get("sumber"),
+    ]
+    identity_columns = [
+        column for column in identity_columns
+        if column and column in working.columns
+    ]
+
+    for column in identity_columns:
+        working[column] = (
+            working[column]
+            .astype(str)
+            .replace({"": pd.NA, "nan": pd.NA, "None": pd.NA})
+        )
+
+        if "__sheet_name__" in working.columns:
+            working[column] = (
+                working.groupby("__sheet_name__", dropna=False)[column]
+                .ffill()
+            )
+        else:
+            working[column] = working[column].ffill()
+
+        working[column] = working[column].fillna("")
+
+    return working
+
+
+
 def search_recommendations(df, keyword):
-    if df.empty or not keyword.strip():
+    """
+    Mencari tanaman berdasarkan keluhan/penyakit, zat bioaktif, atau khasiat.
+    Hasil hanya berisi informasi inti untuk tabel rekomendasi.
+    """
+    if df.empty or not str(keyword).strip():
         return pd.DataFrame()
 
     columns = get_column_map(df)
-    searchable_columns = [
-        columns["khasiat"],
-        columns["benefit"],
-        columns["penyakit"],
-        columns["senyawa"],
-    ]
-    searchable_columns = [c for c in searchable_columns if c is not None]
+    working = _prepare_recommendation_dataframe(df, columns)
+    search_terms = expand_recommendation_terms(keyword)
 
-    if not searchable_columns:
+    if not search_terms:
         return pd.DataFrame()
 
-    keyword_clean = clean_text(keyword)
-    scores = []
+    search_fields = [
+        (columns.get("penyakit"), 10, "Nama Penyakit"),
+        (columns.get("khasiat"), 9, "Khasiat"),
+        (columns.get("benefit"), 8, "Manfaat"),
+        (columns.get("senyawa"), 8, "Zat Bioaktif"),
+        (columns.get("nama"), 2, "Nama Tanaman"),
+        (columns.get("latin"), 2, "Nama Latin"),
+        (columns.get("lokal"), 2, "Nama Lokal/Daerah"),
+    ]
+    search_fields = [
+        item for item in search_fields
+        if item[0] and item[0] in working.columns
+    ]
 
-    for index, row in df.iterrows():
-        score = 0
-        evidence = []
+    if not search_fields:
+        return pd.DataFrame()
 
-        for column in searchable_columns:
-            value = str(row.get(column, "")).strip()
-            value_clean = clean_text(value)
+    original_keyword = clean_text(keyword)
+    scored_rows = []
 
-            if keyword_clean and keyword_clean in value_clean:
-                score += 3
-                evidence.append(f"{column}: {value}")
+    for index, row in working.iterrows():
+        total_score = 0
 
-            for token in keyword_clean.split():
-                if len(token) >= 3 and token in value_clean:
-                    score += 1
+        for column, weight, _ in search_fields:
+            raw_value = str(row.get(column, "") or "").strip()
+            value_clean = clean_text(raw_value)
 
-        if score > 0:
-            scores.append({
+            if not value_clean:
+                continue
+
+            best_score = 0
+
+            for term in search_terms:
+                if not term:
+                    continue
+
+                if term in value_clean:
+                    multiplier = 12 if term == original_keyword else 7
+                    current_score = weight * multiplier
+                else:
+                    term_tokens = {
+                        token for token in term.split()
+                        if len(token) >= 3
+                    }
+                    value_tokens = set(value_clean.split())
+                    current_score = weight * len(term_tokens & value_tokens)
+
+                best_score = max(best_score, current_score)
+
+            total_score += best_score
+
+        if total_score > 0:
+            scored_rows.append({
                 "_index": index,
-                "Skor": score,
-                "Bukti": " | ".join(evidence[:3]),
+                "Skor Relevansi": total_score,
             })
 
-    if not scores:
+    if not scored_rows:
         return pd.DataFrame()
 
-    score_df = pd.DataFrame(scores)
-    matched = df.loc[score_df["_index"]].copy().reset_index(drop=True)
-    matched["Skor Rekomendasi"] = score_df["Skor"].values
-    matched["Bukti Kecocokan"] = score_df["Bukti"].values
+    score_df = pd.DataFrame(scored_rows)
+    matched = (
+        working.loc[score_df["_index"]]
+        .copy()
+        .reset_index(drop=True)
+    )
+    matched["Skor Relevansi"] = score_df["Skor Relevansi"].values
 
-    name_col = columns["nama"]
-    latin_col = columns["latin"]
-    effect_col = columns["khasiat"]
-    compound_col = columns["senyawa"]
-    part_col = columns["bagian"]
-    source_col = columns["sumber"]
+    name_series = _series_or_default(matched, columns.get("nama"))
+    latin_series = _series_or_default(matched, columns.get("latin"))
+    local_series = _series_or_default(matched, columns.get("lokal"))
+    compound_series = _series_or_default(matched, columns.get("senyawa"))
+    effect_series = _series_or_default(matched, columns.get("khasiat"))
+    benefit_series = _series_or_default(matched, columns.get("benefit"))
+    disease_series = _series_or_default(matched, columns.get("penyakit"))
+
+    display_name = name_series.mask(
+        name_series.str.strip().eq(""),
+        local_series,
+    )
+    display_name = display_name.mask(
+        display_name.str.strip().eq(""),
+        latin_series,
+    ).replace("", "Tidak terdeteksi")
+
+    display_local = local_series.mask(
+        local_series.str.strip().eq(""),
+        display_name,
+    ).replace("", "Tidak terdeteksi")
+
+    display_latin = latin_series.replace("", "Belum terdeteksi")
+
+    effects = [
+        _combine_benefit_values(benefit, effect)
+        for benefit, effect in zip(benefit_series, effect_series)
+    ]
 
     output = pd.DataFrame({
-        "Nama Tanaman": (
-            matched[name_col] if name_col else "Belum terdeteksi"
+        "Nama Tanaman": display_name,
+        "Nama Latin": display_latin,
+        "Nama Lokal/Daerah": display_local,
+        "Zat Bioaktif": compound_series.replace(
+            "", "Belum terdeteksi"
         ),
-        "Nama Latin": (
-            matched[latin_col] if latin_col else "Belum terdeteksi"
+        "Khasiat/Efek Terapeutik": effects,
+        "Nama Penyakit": disease_series.replace(
+            "", "Belum terdeteksi"
         ),
-        "Khasiat/Efek": (
-            matched[effect_col] if effect_col else "Belum terdeteksi"
-        ),
-        "Zat Bioaktif": (
-            matched[compound_col] if compound_col else "Belum terdeteksi"
-        ),
-        "Bagian": (
-            matched[part_col] if part_col else "Belum terdeteksi"
-        ),
-        "Sumber": (
-            matched[source_col] if source_col else "Belum terdeteksi"
-        ),
-        "Skor Rekomendasi": matched["Skor Rekomendasi"],
-        "Bukti Kecocokan": matched["Bukti Kecocokan"],
+        "Skor Relevansi": matched["Skor Relevansi"],
     })
 
+    output["_plant_key"] = (
+        output["Nama Tanaman"].map(clean_text)
+        + "|"
+        + output["Nama Latin"].map(clean_text)
+    )
+
+    grouped_results = []
+
+    for _, group in output.groupby("_plant_key", sort=False):
+        grouped_results.append({
+            "Nama Tanaman": _merge_unique_recommendation_values(
+                group["Nama Tanaman"], max_items=1
+            ),
+            "Nama Latin": _merge_unique_recommendation_values(
+                group["Nama Latin"], max_items=2
+            ),
+            "Nama Lokal/Daerah": _merge_unique_recommendation_values(
+                group["Nama Lokal/Daerah"], max_items=3
+            ),
+            "Zat Bioaktif": _merge_unique_recommendation_values(
+                group["Zat Bioaktif"], max_items=6
+            ),
+            "Khasiat/Efek Terapeutik": _merge_unique_recommendation_values(
+                group["Khasiat/Efek Terapeutik"], max_items=5
+            ),
+            "Nama Penyakit": _merge_unique_recommendation_values(
+                group["Nama Penyakit"], max_items=5
+            ),
+            "Skor Relevansi": int(group["Skor Relevansi"].max()),
+        })
+
     return (
-        output
-        .sort_values("Skor Rekomendasi", ascending=False)
-        .drop_duplicates(subset=["Nama Tanaman", "Khasiat/Efek"])
+        pd.DataFrame(grouped_results)
+        .sort_values(
+            ["Skor Relevansi", "Nama Tanaman"],
+            ascending=[False, True],
+        )
         .reset_index(drop=True)
     )
 
-
-# =========================================================
-# CSS
-# =========================================================
-hero_bg = find_optional_background()
-
-if hero_bg:
-    hero_background_css = (
-        "linear-gradient(90deg, rgba(255,255,255,0.97), "
-        "rgba(255,255,255,0.60)), "
-        f'url("{hero_bg}")'
-    )
-else:
-    hero_background_css = (
-        "radial-gradient(circle at 70% 40%, "
-        "rgba(187,247,208,0.90), transparent 28%), "
-        "linear-gradient(135deg, #ffffff 0%, #ecfdf5 55%, #f8fafc 100%)"
-    )
-
-css_styles = """<style>
-.stApp {
-    background: #f5fbf7;
-}
-.main .block-container {
-    padding-top: 1rem;
-    max-width: 1500px;
-}
-[data-testid="stSidebar"] {
-    background:
-        radial-gradient(circle at bottom left, rgba(34,197,94,0.25), transparent 28%),
-        radial-gradient(circle at top right, rgba(16,185,129,0.18), transparent 35%),
-        linear-gradient(180deg, #021f16 0%, #043b2c 45%, #065f46 100%);
-    border-right: 1px solid rgba(255,255,255,0.12);
-}
-[data-testid="stSidebar"] * {
-    color: #f8fff8;
-}
-[data-testid="stSidebar"] .stButton > button {
-    background: transparent;
-    color: #f8fff8;
-    border: none;
-    box-shadow: none;
-    text-align: left;
-    justify-content: flex-start;
-    padding: 0.72rem 0.8rem;
-    border-radius: 0.8rem;
-    font-weight: 650;
-    margin-bottom: 0.2rem;
-    width: 100%;
-}
-[data-testid="stSidebar"] .stButton > button:hover {
-    background: rgba(255,255,255,0.12);
-    color: #ffffff;
-}
-.nav-active {
-    background: linear-gradient(90deg, rgba(34,197,94,0.38), rgba(16,185,129,0.20));
-    border: 1px solid rgba(134,239,172,0.28);
-    border-radius: 0.8rem;
-    padding: 0.78rem 0.85rem;
-    margin-bottom: 0.3rem;
-    color: #ffffff;
-    font-weight: 800;
-}
-.sidebar-section-title {
-    color: #86efac;
-    font-size: 0.75rem;
-    font-weight: 900;
-    letter-spacing: 0.08rem;
-    margin-top: 1.25rem;
-    margin-bottom: 0.45rem;
-}
-.sidebar-line {
-    height: 1px;
-    background: rgba(255,255,255,0.14);
-    margin: 1rem 0;
-}
-.top-header {
-    background: linear-gradient(135deg, #013220, #064e3b, #065f46);
-    padding: 1.4rem 1.7rem;
-    border-radius: 0 0 1.6rem 1.6rem;
-    color: white;
-    margin-bottom: 1.25rem;
-    box-shadow: 0 16px 38px rgba(0,0,0,0.18);
-}
-.top-header h1 {
-    margin: 0;
-    color: white;
-    font-size: 2.1rem;
-    font-weight: 900;
-}
-.top-header p {
-    margin: 0.35rem 0 0;
-    color: #d1fae5;
-}
-.hero-banner {
-    background: __HERO_BACKGROUND__;
-    background-size: cover;
-    background-position: center;
-    padding: 2rem;
-    border-radius: 1.35rem;
-    min-height: 220px;
-    box-shadow: inset 0 0 0 1px rgba(6,78,59,0.08);
-}
-.hero-banner h2 {
-    color: #047857;
-    font-size: 1.85rem;
-    font-weight: 900;
-    margin-bottom: 0.8rem;
-}
-.hero-banner p {
-    color: #12372a;
-    font-size: 1rem;
-    line-height: 1.65;
-    max-width: 700px;
-}
-.section-title {
-    color: #064e3b;
-    font-size: 1.55rem;
-    font-weight: 900;
-    margin-top: 1.25rem;
-    margin-bottom: 0.75rem;
-}
-[data-testid="stMetric"] {
-    background: white;
-    border: 1px solid rgba(6,78,59,0.10);
-    border-radius: 1rem;
-    padding: 1rem;
-    box-shadow: 0 8px 20px rgba(15,23,42,0.07);
-}
-[data-testid="stMetricLabel"] {
-    color: #065f46;
-    font-weight: 800;
-}
-[data-testid="stMetricValue"] {
-    color: #047857;
-    font-weight: 900;
-}
-.result-card {
-    background: #ffffff;
-    border-left: 0.42rem solid #047857;
-    border-radius: 0.9rem;
-    padding: 1rem;
-    min-height: 118px;
-    box-shadow: 0 8px 18px rgba(15,23,42,0.08);
-    margin-bottom: 0.75rem;
-}
-.result-card h4 {
-    color: #064e3b;
-    font-weight: 900;
-    margin: 0 0 0.45rem 0;
-}
-.result-card p {
-    color: #0f172a;
-    font-size: 0.98rem;
-    line-height: 1.45;
-    margin: 0;
-}
-.info-box {
-    background: #f3e8ff;
-    padding: 1rem;
-    border-radius: 1rem;
-    border: 1px solid #c084fc;
-    color: #111827;
-    margin-bottom: 1rem;
-}
-.stButton > button {
-    background: linear-gradient(90deg, #047857, #059669);
-    color: white;
-    border: none;
-    border-radius: 0.8rem;
-    font-weight: 900;
-}
-.stButton > button:hover {
-    background: linear-gradient(90deg, #065f46, #047857);
-    color: white;
-}
-[data-testid="stFileUploader"] section {
-    background: #fbfffb;
-    border: 2px dashed #86efac;
-    border-radius: 1rem;
-}
-textarea {
-    background: white !important;
-    color: #0f172a !important;
-}
-.quick-card {
-    background: white;
-    border-radius: 1rem;
-    padding: 1rem;
-    border: 1px solid rgba(6,78,59,0.10);
-    box-shadow: 0 8px 20px rgba(15,23,42,0.07);
-    min-height: 160px;
-    text-align: center;
-}
-.quick-card h4 {
-    color: #064e3b;
-    margin: 0.4rem 0;
-}
-.quick-card p {
-    color: #475569;
-    font-size: 0.88rem;
-}
-.bioactive-main-card {
-    background:
-        radial-gradient(circle at top right, rgba(254,215,170,0.78), transparent 34%),
-        linear-gradient(135deg, #fff7ed 0%, #fffbeb 52%, #ecfdf5 100%);
-    border: 2px solid #f59e0b;
-    border-left: 0.75rem solid #f97316;
-    border-radius: 1.3rem;
-    padding: 1.45rem;
-    margin-top: 1rem;
-    margin-bottom: 1.25rem;
-    box-shadow: 0 14px 32px rgba(249,115,22,0.15);
-}
-.bioactive-main-card h2 {
-    color: #9a3412;
-    font-size: 1.65rem;
-    font-weight: 900;
-    margin: 0 0 0.4rem 0;
-}
-.bioactive-number {
-    color: #ea580c;
-    font-size: 2.9rem;
-    font-weight: 900;
-    line-height: 1;
-    margin-top: 0.55rem;
-}
-.bioactive-description {
-    color: #475569;
-    font-size: 0.98rem;
-    line-height: 1.6;
-    margin-top: 0.7rem;
-}
-.bioactive-chip {
-    display: inline-block;
-    background: #ffffff;
-    color: #9a3412;
-    border: 1px solid #fdba74;
-    border-radius: 999px;
-    padding: 0.38rem 0.7rem;
-    margin: 0.35rem 0.25rem 0 0;
-    font-size: 0.82rem;
-    font-weight: 800;
-}
-.bioactive-result {
-    background: linear-gradient(135deg, #fff7ed 0%, #fffbeb 55%, #f0fdf4 100%);
-    border: 2px solid #fb923c;
-    border-left: 0.75rem solid #f97316;
-    border-radius: 1.15rem;
-    padding: 1.3rem;
-    margin-top: 1rem;
-    margin-bottom: 1.15rem;
-    box-shadow: 0 12px 28px rgba(249,115,22,0.14);
-}
-.bioactive-result h2 {
-    color: #9a3412;
-    font-size: 1.45rem;
-    font-weight: 900;
-    margin: 0 0 0.7rem 0;
-}
-.bioactive-compound {
-    color: #c2410c;
-    font-size: 1.6rem;
-    font-weight: 900;
-    margin-bottom: 0.65rem;
-    overflow-wrap: anywhere;
-}
-.bioactive-relation {
-    color: #065f46;
-    font-size: 1rem;
-    font-weight: 700;
-    line-height: 1.65;
-    overflow-wrap: anywhere;
-}
-.result-card.bioactive-card {
-    background: linear-gradient(135deg, #fff7ed, #fffbeb);
-    border-left-color: #f97316;
-    border: 2px solid #fdba74;
-    border-left-width: 0.55rem;
-}
-.result-card.bioactive-card h4 {
-    color: #9a3412;
-}
-
-
-.bioactive-summary-text {
-    color: #1f2937;
-    font-size: 1.05rem;
-    line-height: 1.75;
-    margin-top: 0.8rem;
-    padding: 1rem;
-    background: rgba(255,255,255,0.78);
-    border: 1px solid #fed7aa;
-    border-radius: 0.9rem;
-}
-.bioactive-source-text {
-    color: #475569;
-    font-size: 0.9rem;
-    line-height: 1.55;
-    margin-top: 0.8rem;
-}
-
-</style>"""
-
-# Masukkan background dinamis tanpa memakai f-string pada CSS.
-css_styles = css_styles.replace(
-    "__HERO_BACKGROUND__",
-    hero_background_css,
-)
-
-st.markdown(
-    css_styles,
-    unsafe_allow_html=True,
-)
-
-
-# =========================================================
-# SIDEBAR
-# =========================================================
-st.sidebar.markdown("# 🌿 HyTBIONEX")
-st.sidebar.caption("Hybrid Transformer Pipeline")
-st.sidebar.markdown('<div class="sidebar-line"></div>', unsafe_allow_html=True)
-
-sidebar_nav_button("🏠 Dashboard", "🏠 Dashboard", "nav_dashboard")
-
-st.sidebar.markdown(
-    '<div class="sidebar-section-title">EKSTRAKSI DATA</div>',
-    unsafe_allow_html=True,
-)
-sidebar_nav_button("🌿 Input Tanaman", "🌿 Input Tanaman", "nav_input")
-sidebar_nav_button("📄 Upload Dokumen", "📄 Upload Dokumen", "nav_upload")
-sidebar_nav_button(
-    "📋 Bioaktif Informasi Ekstraksi",
-    "📋 Bioaktif Informasi Ekstraksi",
-    "nav_entity_result",
-)
-sidebar_nav_button(
-    "🔗 Bioactive Relation Extraction",
-    "🔗 Relation Extraction",
-    "nav_relation",
-)
-sidebar_nav_button(
-    "🕸️ HerbKG 2.0 Explorer",
-    "🕸️ HerbKG 2.0 Explorer",
-    "nav_kg",
-)
-
-st.sidebar.markdown(
-    '<div class="sidebar-section-title">APLIKASI DOWNSTREAM</div>',
-    unsafe_allow_html=True,
-)
-sidebar_nav_button(
-    "📦 Ringkasan Downstream",
-    "📦 Ringkasan Downstream",
-    "nav_downstream",
-)
-sidebar_nav_button(
-    "📊 Analisis Deskriptif",
-    "📊 Analisis Deskriptif",
-    "nav_descriptive",
-)
-sidebar_nav_button(
-    "🔎 Query Graf Berbasis Bukti",
-    "🔎 Query Graf Berbasis Bukti",
-    "nav_evidence",
-)
-sidebar_nav_button(
-    "🧬 Analisis Kemiripan",
-    "🧬 Analisis Kemiripan",
-    "nav_similarity",
-)
-sidebar_nav_button(
-    "💡 Rekomendasi Herbal",
-    "💡 Rekomendasi Herbal",
-    "nav_recommendation",
-)
-
-st.sidebar.markdown(
-    '<div class="sidebar-section-title">MODEL DAN SISTEM</div>',
-    unsafe_allow_html=True,
-)
-sidebar_nav_button(
-    "📈 Statistik & Analitik",
-    "📈 Statistik & Analitik",
-    "nav_statistics",
-)
-sidebar_nav_button(
-    "🧩 Training Model",
-    "🧩 Training Model",
-    "nav_training",
-)
-sidebar_nav_button(
-    "⚙️ Pengaturan",
-    "⚙️ Pengaturan",
-    "nav_settings",
-)
-sidebar_nav_button(
-    "ℹ️ Tentang Aplikasi",
-    "ℹ️ Tentang Aplikasi",
-    "nav_about",
-)
-
-st.sidebar.markdown('<div class="sidebar-line"></div>', unsafe_allow_html=True)
-st.sidebar.caption("© 2026 HyTBIONEX • Nazwita, M.Kom.")
-
-
-# =========================================================
-# HEADER
-# =========================================================
-st.markdown(
-    """<div class="top-header">
-<h1>🌿 HyTBIONEX</h1>
-<p>Sistem Ekstraksi Kandungan Bioaktif Tanaman Herbal Indonesia dan HerbKG 2.0</p>
-</div>""",
-    unsafe_allow_html=True,
-)
-
-
-# =========================================================
-# LOAD DATASET
-# =========================================================
-df_data, dataset_status = load_dataset(st.session_state.dataset_file)
-columns = get_column_map(df_data)
-
-total_rows = len(df_data)
-total_plants = (
-    df_data[columns["nama"]].astype(str).replace("", pd.NA).dropna().nunique()
-    if columns["nama"] else 0
-)
-total_compounds = (
-    df_data[columns["senyawa"]].astype(str).replace("", pd.NA).dropna().nunique()
-    if columns["senyawa"] else 0
-)
-total_effects = (
-    df_data[columns["khasiat"]].astype(str).replace("", pd.NA).dropna().nunique()
-    if columns["khasiat"] else 0
-)
-total_relations = total_rows * 8 if total_rows else 0
-
-
-# =========================================================
-# KOMPONEN TAMPILAN
-# =========================================================
 def render_metrics():
     metric_cols = st.columns(5)
     metric_cols[0].metric("Total Baris", f"{total_rows:,}")
@@ -2715,25 +2860,47 @@ bagian tanaman, aktivitas biologis/efek terapeutik, dan sumber bukti.
         )
 
 
+
+
 def render_bioactive_focus(result):
     """
-    Menampilkan output utama berupa ringkasan kandungan senyawa bioaktif
-    dari tanaman yang dimasukkan atau dari artikel yang diunggah.
+    Menampilkan Zat Bioaktif sebagai output utama,
+    disertai Keterangan dalam satu kalimat langsung.
     """
-    plant = result.get("Nama Tanaman", "Belum terdeteksi")
-    compound = result.get("Zat Bioaktif", "Belum terdeteksi")
-    summary = result.get("Ringkasan Bioaktif") or build_bioactive_summary(result)
-    source = result.get("Sumber Data", "Belum terdeteksi")
+    plant = result.get(
+        "Nama Tanaman",
+        "Belum terdeteksi",
+    )
+    compound = result.get(
+        "Zat Bioaktif",
+        "Belum terdeteksi",
+    )
+    activity = result.get(
+        "Khasiat/Efek Terapeutik",
+        "Belum terdeteksi",
+    )
+    disease = result.get(
+        "Kategori Penyakit",
+        "Belum terdeteksi",
+    )
+    conclusion = build_therapeutic_conclusion(result)
+    source = result.get(
+        "Sumber Data",
+        "Belum terdeteksi",
+    )
 
     st.markdown(
         f"""<div class="bioactive-result">
-<h2>🧪 Output Utama Ekstraksi — Ringkasan Senyawa Bioaktif</h2>
-<div class="bioactive-compound">{safe_text(plant)}: {safe_text(compound)}</div>
+<h2>🧪 OUTPUT UTAMA: ZAT BIOAKTIF</h2>
+<div class="bioactive-compound">{safe_text(compound)}</div>
 <div class="bioactive-summary-text">
-{safe_text(summary)}
+<b>Nama Tanaman:</b> {safe_text(plant)}<br>
+<b>Khasiat:</b> {safe_text(activity)}<br>
+<b>Kategori Penyakit:</b> {safe_text(disease)}<br><br>
+<b>Keterangan:</b> {safe_text(conclusion)}
 </div>
 <div class="bioactive-source-text">
-📚 <b>Sumber Data:</b> {safe_text(source)}
+📚 <b>Sumber_Data:</b> {safe_text(source)}
 </div>
 </div>""",
         unsafe_allow_html=True,
@@ -2847,60 +3014,122 @@ def render_analysis_form(prefix, allow_text=True, allow_upload=True):
 
 
 
+
+def build_excel_result_dataframe(result):
+    """
+    Menyusun satu baris hasil dengan judul kolom yang sama seperti dataset Excel.
+    """
+    return pd.DataFrame([{
+        "Nama_Tanaman": result.get(
+            "Nama Tanaman",
+            "Belum terdeteksi",
+        ),
+        "Nama_Lokal/ Daerah": result.get(
+            "Nama Lokal/Daerah",
+            "Belum terdeteksi",
+        ),
+        "Nama_Latin": result.get(
+            "Nama Latin",
+            "Belum terdeteksi",
+        ),
+        "Bagian_Tanaman": result.get(
+            "Bagian Tanaman",
+            "Belum terdeteksi",
+        ),
+        "Zat Bioaktif": result.get(
+            "Zat Bioaktif",
+            "Belum terdeteksi",
+        ),
+        "Khasiat_Efek_Terapeutik": result.get(
+            "Khasiat/Efek Terapeutik",
+            "Belum terdeteksi",
+        ),
+        "Kategori_Penyakit": result.get(
+            "Kategori Penyakit",
+            "Belum terdeteksi",
+        ),
+        "Komposisi /Dosis": result.get(
+            "Komposisi/Dosis",
+            "Belum terdeteksi",
+        ),
+        "Cara_Pengolahan": result.get(
+            "Cara Pengolahan",
+            "Belum terdeteksi",
+        ),
+        "Keterangan": result.get(
+            "Keterangan",
+            "Belum terdeteksi",
+        ),
+        "Sumber_Data": result.get(
+            "Sumber Data",
+            "Belum terdeteksi",
+        ),
+    }])
+
+
 def render_result_cards(result):
     st.markdown(
-        '<div class="section-title">📋 Bioaktif Informasi Ekstraksi</div>',
+        '<div class="section-title">'
+        '📋 Bioaktif Informasi Ekstraksi — Sesuai Kolom Dataset'
+        '</div>',
         unsafe_allow_html=True,
     )
 
-    cards = [
-        (
-            "🧪 SENYAWA BIOAKTIF",
-            result.get("Zat Bioaktif", "Tidak terdeteksi"),
-            True,
-        ),
-        (
-            "💚 AKTIVITAS BIOLOGIS / EFEK TERAPEUTIK",
-            result.get("Khasiat/Efek Terapeutik", "Tidak terdeteksi"),
-            True,
-        ),
-        ("🌿 Nama Tanaman", result.get("Nama Tanaman", "Tidak terdeteksi"), False),
-        ("🔬 Nama Latin", result.get("Nama Latin", "Tidak terdeteksi"), False),
-        (
-            "🇮🇩 Nama Lokal/Daerah",
-            result.get("Nama Lokal/Daerah", "Tidak terdeteksi"),
-            False,
-        ),
-        ("🍃 Bagian Tanaman", result.get("Bagian Tanaman", "Tidak terdeteksi"), False),
-        (
-            "☕ Cara Pengolahan — Ringkasan Poin Artikel",
-            result.get("Cara Pengolahan", "Tidak terdeteksi"),
-            False,
-        ),
-        (
-            "⚖️ Komposisi/Dosis — Ringkasan Poin Artikel",
-            result.get("Komposisi/Dosis", "Tidak terdeteksi"),
-            False,
-        ),
-        (
-            "📚 Sumber Data",
-            result.get("Sumber Data", "Tidak terdeteksi"),
-            False,
-        ),
-    ]
+    result_df = build_excel_result_dataframe(result)
 
-    for start in range(0, len(cards), 3):
-        row = st.columns(3)
-        for column, (title, value, is_bioactive) in zip(row, cards[start:start + 3]):
-            card_class = "result-card bioactive-card" if is_bioactive else "result-card"
-            with column:
-                st.markdown(
-                    f'''<div class="{card_class}">
-<h4>{safe_text(title)}</h4>
-<p>{safe_text(value)}</p>
-</div>''',
-                    unsafe_allow_html=True,
-                )
+    st.dataframe(
+        result_df,
+        use_container_width=True,
+        hide_index=True,
+        height=190,
+        column_config={
+            "Nama_Tanaman": st.column_config.TextColumn(
+                "Nama_Tanaman",
+                width="medium",
+            ),
+            "Nama_Lokal/ Daerah": st.column_config.TextColumn(
+                "Nama_Lokal/ Daerah",
+                width="medium",
+            ),
+            "Nama_Latin": st.column_config.TextColumn(
+                "Nama_Latin",
+                width="medium",
+            ),
+            "Bagian_Tanaman": st.column_config.TextColumn(
+                "Bagian_Tanaman",
+                width="medium",
+            ),
+            "Zat Bioaktif": st.column_config.TextColumn(
+                "Zat Bioaktif",
+                width="large",
+            ),
+            "Khasiat_Efek_Terapeutik": st.column_config.TextColumn(
+                "Khasiat_Efek_Terapeutik",
+                width="large",
+            ),
+            "Kategori_Penyakit": st.column_config.TextColumn(
+                "Kategori_Penyakit",
+                width="large",
+            ),
+            "Komposisi /Dosis": st.column_config.TextColumn(
+                "Komposisi /Dosis",
+                width="large",
+            ),
+            "Cara_Pengolahan": st.column_config.TextColumn(
+                "Cara_Pengolahan",
+                width="large",
+            ),
+            "Keterangan": st.column_config.TextColumn(
+                "Keterangan",
+                width="large",
+            ),
+            "Sumber_Data": st.column_config.TextColumn(
+                "Sumber_Data",
+                width="large",
+            ),
+        },
+    )
+
 
 def render_image_section(result, image_path):
     st.markdown(
@@ -3058,7 +3287,8 @@ def render_preview_kg():
             "Cara Pengolahan": "Digeprek lalu direbus",
             "Komposisi/Dosis": "1–2 batang",
             "Sumber Data": "Buku Saku TOGA Kemenkes RI",
-            "Kategori Penyakit": "Belum terdeteksi",
+            "Kategori Penyakit": "Infeksi dan peradangan",
+            "Keterangan": "Serai mengandung citronellal dan geraniol yang berkaitan dengan aktivitas antimikroba.",
             "Gambar": "Belum terdeteksi",
         }
 
@@ -3303,24 +3533,27 @@ def render_similarity_page():
         )
 
 
+
+
 def render_recommendation_page():
     st.markdown(
         '<div class="section-title">💡 Rekomendasi Herbal</div>',
         unsafe_allow_html=True,
     )
 
-    keyword = st.text_input(
-        "Masukkan kata kunci khasiat, penyakit, atau senyawa",
-        placeholder="Contoh: antimikroba, hipertensi, diabetes, flavonoid",
-        key="recommendation_keyword",
+    st.write(
+        "Masukkan keluhan atau penyakit, zat bioaktif, maupun khasiat. "
+        "Contoh: **sakit perut**, **batuk**, **hipertensi**, "
+        "**flavonoid**, atau **antiinflamasi**."
     )
 
-    top_n = st.slider(
-        "Jumlah rekomendasi",
-        min_value=5,
-        max_value=30,
-        value=10,
-        key="recommendation_top_n",
+    keyword = st.text_input(
+        "Keluhan, penyakit, zat bioaktif, atau khasiat",
+        placeholder=(
+            "Contoh: sakit perut, maag, batuk, diabetes, flavonoid, "
+            "antiinflamasi"
+        ),
+        key="recommendation_keyword",
     )
 
     if st.button(
@@ -3328,58 +3561,69 @@ def render_recommendation_page():
         use_container_width=True,
         key="recommendation_run",
     ):
+        if not keyword.strip():
+            st.warning("Masukkan kata pencarian terlebih dahulu.")
+            return
+
         recommendations = search_recommendations(df_data, keyword)
 
         if recommendations.empty:
             st.warning(
-                "Belum ditemukan rekomendasi yang cocok dengan kata kunci tersebut."
+                "Belum ditemukan tanaman yang sesuai. "
+                "Coba gunakan istilah lain yang terdapat pada dataset."
             )
             return
 
-        top_results = recommendations.head(top_n)
+        display_columns = [
+            "Nama Tanaman",
+            "Nama Latin",
+            "Nama Lokal/Daerah",
+            "Zat Bioaktif",
+            "Khasiat/Efek Terapeutik",
+            "Nama Penyakit",
+        ]
+
         st.success(
-            f"Ditemukan {len(recommendations):,} kandidat rekomendasi."
+            f"Ditemukan {len(recommendations):,} tanaman herbal yang terkait."
         )
+
         st.dataframe(
-            top_results,
+            recommendations[display_columns].head(30),
             use_container_width=True,
             hide_index=True,
+            height=min(800, 105 + 62 * min(len(recommendations), 30)),
+            column_config={
+                "Nama Tanaman": st.column_config.TextColumn(
+                    "Nama Tanaman",
+                    width="medium",
+                ),
+                "Nama Latin": st.column_config.TextColumn(
+                    "Nama Latin",
+                    width="medium",
+                ),
+                "Nama Lokal/Daerah": st.column_config.TextColumn(
+                    "Nama Lokal/Daerah",
+                    width="medium",
+                ),
+                "Zat Bioaktif": st.column_config.TextColumn(
+                    "Zat Bioaktif",
+                    width="large",
+                ),
+                "Khasiat/Efek Terapeutik": st.column_config.TextColumn(
+                    "Khasiat/Efek Terapeutik",
+                    width="large",
+                ),
+                "Nama Penyakit": st.column_config.TextColumn(
+                    "Nama Penyakit",
+                    width="large",
+                ),
+            },
         )
 
-        chart_data = (
-            top_results.groupby("Nama Tanaman", as_index=False)
-            ["Skor Rekomendasi"].max()
-            .sort_values("Skor Rekomendasi")
+        st.caption(
+            "Tabel ini menampilkan kecocokan berdasarkan data yang tersedia "
+            "dalam dataset HyTBIONEX."
         )
-
-        fig = px.bar(
-            chart_data,
-            x="Skor Rekomendasi",
-            y="Nama Tanaman",
-            orientation="h",
-            text="Skor Rekomendasi",
-            title=f"Rekomendasi Herbal untuk Kata Kunci: {keyword}",
-        )
-        fig.update_layout(
-            height=450,
-            plot_bgcolor="white",
-            paper_bgcolor="white",
-        )
-        st.plotly_chart(
-            fig,
-            use_container_width=True,
-            key="recommendation_chart",
-            config={"displaylogo": False},
-        )
-
-        st.download_button(
-            "⬇️ Unduh Rekomendasi CSV",
-            data=recommendations.to_csv(index=False).encode("utf-8"),
-            file_name="rekomendasi_herbal.csv",
-            mime="text/csv",
-            key="recommendation_download",
-        )
-
 
 def render_training_page():
     st.markdown(
