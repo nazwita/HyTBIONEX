@@ -2760,6 +2760,448 @@ def search_recommendations(df, keyword):
         .reset_index(drop=True)
     )
 
+
+# =========================================================
+# CSS
+# =========================================================
+hero_bg = find_optional_background()
+
+if hero_bg:
+    hero_background_css = (
+        "linear-gradient(90deg, rgba(255,255,255,0.97), "
+        "rgba(255,255,255,0.60)), "
+        f'url("{hero_bg}")'
+    )
+else:
+    hero_background_css = (
+        "radial-gradient(circle at 70% 40%, "
+        "rgba(187,247,208,0.90), transparent 28%), "
+        "linear-gradient(135deg, #ffffff 0%, #ecfdf5 55%, #f8fafc 100%)"
+    )
+
+css_styles = """<style>
+.stApp {
+    background: #f5fbf7;
+}
+.main .block-container {
+    padding-top: 1rem;
+    max-width: 1500px;
+}
+[data-testid="stSidebar"] {
+    background:
+        radial-gradient(circle at bottom left, rgba(34,197,94,0.25), transparent 28%),
+        radial-gradient(circle at top right, rgba(16,185,129,0.18), transparent 35%),
+        linear-gradient(180deg, #021f16 0%, #043b2c 45%, #065f46 100%);
+    border-right: 1px solid rgba(255,255,255,0.12);
+}
+[data-testid="stSidebar"] * {
+    color: #f8fff8;
+}
+[data-testid="stSidebar"] .stButton > button {
+    background: transparent;
+    color: #f8fff8;
+    border: none;
+    box-shadow: none;
+    text-align: left;
+    justify-content: flex-start;
+    padding: 0.72rem 0.8rem;
+    border-radius: 0.8rem;
+    font-weight: 650;
+    margin-bottom: 0.2rem;
+    width: 100%;
+}
+[data-testid="stSidebar"] .stButton > button:hover {
+    background: rgba(255,255,255,0.12);
+    color: #ffffff;
+}
+.nav-active {
+    background: linear-gradient(90deg, rgba(34,197,94,0.38), rgba(16,185,129,0.20));
+    border: 1px solid rgba(134,239,172,0.28);
+    border-radius: 0.8rem;
+    padding: 0.78rem 0.85rem;
+    margin-bottom: 0.3rem;
+    color: #ffffff;
+    font-weight: 800;
+}
+.sidebar-section-title {
+    color: #86efac;
+    font-size: 0.75rem;
+    font-weight: 900;
+    letter-spacing: 0.08rem;
+    margin-top: 1.25rem;
+    margin-bottom: 0.45rem;
+}
+.sidebar-line {
+    height: 1px;
+    background: rgba(255,255,255,0.14);
+    margin: 1rem 0;
+}
+.top-header {
+    background: linear-gradient(135deg, #013220, #064e3b, #065f46);
+    padding: 1.4rem 1.7rem;
+    border-radius: 0 0 1.6rem 1.6rem;
+    color: white;
+    margin-bottom: 1.25rem;
+    box-shadow: 0 16px 38px rgba(0,0,0,0.18);
+}
+.top-header h1 {
+    margin: 0;
+    color: white;
+    font-size: 2.1rem;
+    font-weight: 900;
+}
+.top-header p {
+    margin: 0.35rem 0 0;
+    color: #d1fae5;
+}
+.hero-banner {
+    background: __HERO_BACKGROUND__;
+    background-size: cover;
+    background-position: center;
+    padding: 2rem;
+    border-radius: 1.35rem;
+    min-height: 220px;
+    box-shadow: inset 0 0 0 1px rgba(6,78,59,0.08);
+}
+.hero-banner h2 {
+    color: #047857;
+    font-size: 1.85rem;
+    font-weight: 900;
+    margin-bottom: 0.8rem;
+}
+.hero-banner p {
+    color: #12372a;
+    font-size: 1rem;
+    line-height: 1.65;
+    max-width: 700px;
+}
+.section-title {
+    color: #064e3b;
+    font-size: 1.55rem;
+    font-weight: 900;
+    margin-top: 1.25rem;
+    margin-bottom: 0.75rem;
+}
+[data-testid="stMetric"] {
+    background: white;
+    border: 1px solid rgba(6,78,59,0.10);
+    border-radius: 1rem;
+    padding: 1rem;
+    box-shadow: 0 8px 20px rgba(15,23,42,0.07);
+}
+[data-testid="stMetricLabel"] {
+    color: #065f46;
+    font-weight: 800;
+}
+[data-testid="stMetricValue"] {
+    color: #047857;
+    font-weight: 900;
+}
+.result-card {
+    background: #ffffff;
+    border-left: 0.42rem solid #047857;
+    border-radius: 0.9rem;
+    padding: 1rem;
+    min-height: 118px;
+    box-shadow: 0 8px 18px rgba(15,23,42,0.08);
+    margin-bottom: 0.75rem;
+}
+.result-card h4 {
+    color: #064e3b;
+    font-weight: 900;
+    margin: 0 0 0.45rem 0;
+}
+.result-card p {
+    color: #0f172a;
+    font-size: 0.98rem;
+    line-height: 1.45;
+    margin: 0;
+}
+.info-box {
+    background: #f3e8ff;
+    padding: 1rem;
+    border-radius: 1rem;
+    border: 1px solid #c084fc;
+    color: #111827;
+    margin-bottom: 1rem;
+}
+.stButton > button {
+    background: linear-gradient(90deg, #047857, #059669);
+    color: white;
+    border: none;
+    border-radius: 0.8rem;
+    font-weight: 900;
+}
+.stButton > button:hover {
+    background: linear-gradient(90deg, #065f46, #047857);
+    color: white;
+}
+[data-testid="stFileUploader"] section {
+    background: #fbfffb;
+    border: 2px dashed #86efac;
+    border-radius: 1rem;
+}
+textarea {
+    background: white !important;
+    color: #0f172a !important;
+}
+.quick-card {
+    background: white;
+    border-radius: 1rem;
+    padding: 1rem;
+    border: 1px solid rgba(6,78,59,0.10);
+    box-shadow: 0 8px 20px rgba(15,23,42,0.07);
+    min-height: 160px;
+    text-align: center;
+}
+.quick-card h4 {
+    color: #064e3b;
+    margin: 0.4rem 0;
+}
+.quick-card p {
+    color: #475569;
+    font-size: 0.88rem;
+}
+.bioactive-main-card {
+    background:
+        radial-gradient(circle at top right, rgba(254,215,170,0.78), transparent 34%),
+        linear-gradient(135deg, #fff7ed 0%, #fffbeb 52%, #ecfdf5 100%);
+    border: 2px solid #f59e0b;
+    border-left: 0.75rem solid #f97316;
+    border-radius: 1.3rem;
+    padding: 1.45rem;
+    margin-top: 1rem;
+    margin-bottom: 1.25rem;
+    box-shadow: 0 14px 32px rgba(249,115,22,0.15);
+}
+.bioactive-main-card h2 {
+    color: #9a3412;
+    font-size: 1.65rem;
+    font-weight: 900;
+    margin: 0 0 0.4rem 0;
+}
+.bioactive-number {
+    color: #ea580c;
+    font-size: 2.9rem;
+    font-weight: 900;
+    line-height: 1;
+    margin-top: 0.55rem;
+}
+.bioactive-description {
+    color: #475569;
+    font-size: 0.98rem;
+    line-height: 1.6;
+    margin-top: 0.7rem;
+}
+.bioactive-chip {
+    display: inline-block;
+    background: #ffffff;
+    color: #9a3412;
+    border: 1px solid #fdba74;
+    border-radius: 999px;
+    padding: 0.38rem 0.7rem;
+    margin: 0.35rem 0.25rem 0 0;
+    font-size: 0.82rem;
+    font-weight: 800;
+}
+.bioactive-result {
+    background: linear-gradient(135deg, #fff7ed 0%, #fffbeb 55%, #f0fdf4 100%);
+    border: 2px solid #fb923c;
+    border-left: 0.75rem solid #f97316;
+    border-radius: 1.15rem;
+    padding: 1.3rem;
+    margin-top: 1rem;
+    margin-bottom: 1.15rem;
+    box-shadow: 0 12px 28px rgba(249,115,22,0.14);
+}
+.bioactive-result h2 {
+    color: #9a3412;
+    font-size: 1.45rem;
+    font-weight: 900;
+    margin: 0 0 0.7rem 0;
+}
+.bioactive-compound {
+    color: #c2410c;
+    font-size: 1.6rem;
+    font-weight: 900;
+    margin-bottom: 0.65rem;
+    overflow-wrap: anywhere;
+}
+.bioactive-relation {
+    color: #065f46;
+    font-size: 1rem;
+    font-weight: 700;
+    line-height: 1.65;
+    overflow-wrap: anywhere;
+}
+.result-card.bioactive-card {
+    background: linear-gradient(135deg, #fff7ed, #fffbeb);
+    border-left-color: #f97316;
+    border: 2px solid #fdba74;
+    border-left-width: 0.55rem;
+}
+.result-card.bioactive-card h4 {
+    color: #9a3412;
+}
+
+
+.bioactive-summary-text {
+    color: #1f2937;
+    font-size: 1.05rem;
+    line-height: 1.75;
+    margin-top: 0.8rem;
+    padding: 1rem;
+    background: rgba(255,255,255,0.78);
+    border: 1px solid #fed7aa;
+    border-radius: 0.9rem;
+}
+.bioactive-source-text {
+    color: #475569;
+    font-size: 0.9rem;
+    line-height: 1.55;
+    margin-top: 0.8rem;
+}
+
+</style>"""
+
+# Masukkan background dinamis tanpa memakai f-string pada CSS.
+css_styles = css_styles.replace(
+    "__HERO_BACKGROUND__",
+    hero_background_css,
+)
+
+st.markdown(
+    css_styles,
+    unsafe_allow_html=True,
+)
+
+
+# =========================================================
+# SIDEBAR
+# =========================================================
+st.sidebar.markdown("# 🌿 HyTBIONEX")
+st.sidebar.caption("Hybrid Transformer Pipeline")
+st.sidebar.markdown('<div class="sidebar-line"></div>', unsafe_allow_html=True)
+
+sidebar_nav_button("🏠 Dashboard", "🏠 Dashboard", "nav_dashboard")
+
+st.sidebar.markdown(
+    '<div class="sidebar-section-title">EKSTRAKSI DATA</div>',
+    unsafe_allow_html=True,
+)
+sidebar_nav_button("🌿 Input Tanaman", "🌿 Input Tanaman", "nav_input")
+sidebar_nav_button("📄 Upload Dokumen", "📄 Upload Dokumen", "nav_upload")
+sidebar_nav_button(
+    "📋 Bioaktif Informasi Ekstraksi",
+    "📋 Bioaktif Informasi Ekstraksi",
+    "nav_entity_result",
+)
+sidebar_nav_button(
+    "🔗 Relasi Ekstraksi Bioaktif",
+    "🔗 Relasi Ekstraksi",
+    "nav_relation",
+)
+sidebar_nav_button(
+    "🕸️ HerbKG 2.0 Explorer",
+    "🕸️ HerbKG 2.0 Explorer",
+    "nav_kg",
+)
+
+st.sidebar.markdown(
+    '<div class="sidebar-section-title">APLIKASI DOWNSTREAM</div>',
+    unsafe_allow_html=True,
+)
+sidebar_nav_button(
+    "📦 Ringkasan Downstream",
+    "📦 Ringkasan Downstream",
+    "nav_downstream",
+)
+sidebar_nav_button(
+    "📊 Analisis Deskriptif",
+    "📊 Analisis Deskriptif",
+    "nav_descriptive",
+)
+sidebar_nav_button(
+    "🔎 Query Graf Berbasis Bukti",
+    "🔎 Query Graf Berbasis Bukti",
+    "nav_evidence",
+)
+sidebar_nav_button(
+    "🧬 Analisis Kemiripan",
+    "🧬 Analisis Kemiripan",
+    "nav_similarity",
+)
+sidebar_nav_button(
+    "💡 Rekomendasi Herbal",
+    "💡 Rekomendasi Herbal",
+    "nav_recommendation",
+)
+
+st.sidebar.markdown(
+    '<div class="sidebar-section-title">MODEL DAN SISTEM</div>',
+    unsafe_allow_html=True,
+)
+sidebar_nav_button(
+    "📈 Statistik & Analitik",
+    "📈 Statistik & Analitik",
+    "nav_statistics",
+)
+sidebar_nav_button(
+    "🧩 Training Model",
+    "🧩 Training Model",
+    "nav_training",
+)
+sidebar_nav_button(
+    "⚙️ Pengaturan",
+    "⚙️ Pengaturan",
+    "nav_settings",
+)
+sidebar_nav_button(
+    "ℹ️ Tentang Aplikasi",
+    "ℹ️ Tentang Aplikasi",
+    "nav_about",
+)
+
+st.sidebar.markdown('<div class="sidebar-line"></div>', unsafe_allow_html=True)
+st.sidebar.caption("© 2026 HyTBIONEX • Nazwita, M.Kom.")
+
+
+# =========================================================
+# HEADER
+# =========================================================
+st.markdown(
+    """<div class="top-header">
+<h1>🌿 HyTBIONEX</h1>
+<p>Sistem Ekstraksi Informasi Bioaktif Tanaman Herbal Indonesia dan HerbKG 2.0</p>
+</div>""",
+    unsafe_allow_html=True,
+)
+
+
+# =========================================================
+# LOAD DATASET
+# =========================================================
+df_data, dataset_status = load_dataset(st.session_state.dataset_file)
+columns = get_column_map(df_data)
+
+total_rows = len(df_data)
+total_plants = (
+    df_data[columns["nama"]].astype(str).replace("", pd.NA).dropna().nunique()
+    if columns["nama"] else 0
+)
+total_compounds = (
+    df_data[columns["senyawa"]].astype(str).replace("", pd.NA).dropna().nunique()
+    if columns["senyawa"] else 0
+)
+total_effects = (
+    df_data[columns["khasiat"]].astype(str).replace("", pd.NA).dropna().nunique()
+    if columns["khasiat"] else 0
+)
+total_relations = total_rows * 10 if total_rows else 0
+
+# =========================================================
+# KOMPONEN TAMPILAN
+# =========================================================
 def render_metrics():
     metric_cols = st.columns(5)
     metric_cols[0].metric("Total Baris", f"{total_rows:,}")
@@ -3816,7 +4258,9 @@ def render_about_page():
         mengintegrasikan, dan memvisualisasikan informasi bioaktif tanaman herbal Indonesia.
         Sistem ini menghubungkan entitas nama tanaman, nama Latin, nama lokal atau daerah, 
         bagian tanaman, senyawa bioaktif, aktivitas biologis atau efek terapeutik, cara pengolahan, 
-        dosis atau komposisi, serta sumber data ke dalam HerbKG 2.0. 
+        dosis atau komposisi, serta sumber data ke dalam HerbKG 2.0. Pada input dokumen,
+        sumber data diperoleh secara langsung dari judul artikel, nama penulis,  dan tahun publikasi, 
+        sehingga setiap informasi yang diekstraksi dapat ditelusuri kembali secara terstruktur dan berbasis bukti ilmiah.
 
         **Pipeline:** Input → Preprocessing → Adaptive Fine Tuning → BIE → NED → Hybrid Transformer → BRE 
         → HerbKG 2.0 → Aplikasi Downstream.
