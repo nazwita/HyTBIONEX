@@ -2,6 +2,7 @@ import os
 import re
 import html
 import base64
+import unicodedata
 from pathlib import Path
 from collections import Counter
 
@@ -568,6 +569,90 @@ def _clean_plant_name_candidate(value):
     return value
 
 
+def _normalise_lookup_key(value):
+    """Normalisasi nama tanaman/nama file agar pencarian gambar lebih toleran."""
+    value = unicodedata.normalize("NFKD", str(value or ""))
+    value = "".join(character for character in value if not unicodedata.combining(character))
+    value = value.casefold()
+    value = re.sub(r"[^a-z0-9]+", " ", value)
+    return re.sub(r"\s+", " ", value).strip()
+
+
+def _available_plant_images():
+    """Mengambil semua gambar tanaman dari assets, gambar, dan images."""
+    image_files = []
+    valid_extensions = {".jpg", ".jpeg", ".png", ".webp"}
+
+    for directory in [ASSET_DIR, "gambar", "images"]:
+        folder = Path(directory)
+        if not folder.exists() or not folder.is_dir():
+            continue
+
+        for path in folder.rglob("*"):
+            if path.is_file() and path.suffix.casefold() in valid_extensions:
+                image_files.append(path)
+
+    return image_files
+
+
+def _plant_name_from_title_and_assets(article_title):
+    """
+    Mengambil nama umum tanaman dari judul dengan mencocokkannya terhadap
+    nama file gambar. Contoh: judul mengandung 'Kelor' dan tersedia
+    assets/kelor.jpg, maka nama tanaman menjadi 'Kelor'.
+    """
+    title_key = _normalise_lookup_key(article_title)
+    if not title_key:
+        return ""
+
+    title_tokens = set(title_key.split())
+    best_name = ""
+    best_score = 0
+
+    for image_path in _available_plant_images():
+        stem = re.sub(r"[_-]+", " ", image_path.stem).strip()
+        stem_key = _normalise_lookup_key(stem)
+        if not stem_key:
+            continue
+
+        stem_tokens = set(stem_key.split())
+        score = 0
+
+        if re.search(rf"(?<![a-z0-9]){re.escape(stem_key)}(?![a-z0-9])", title_key):
+            score = 120 + len(stem_key)
+        elif stem_tokens and stem_tokens.issubset(title_tokens):
+            score = 100 + len(stem_tokens) * 5
+        else:
+            overlap = len(stem_tokens & title_tokens)
+            if overlap and overlap / max(len(stem_tokens), 1) >= 0.75:
+                score = 60 + overlap * 5
+
+        if score > best_score:
+            best_score = score
+            best_name = stem
+
+    if best_name:
+        return " ".join(word.capitalize() for word in best_name.split())
+
+    # Fallback nama tanaman umum yang sering muncul dalam judul artikel.
+    common_names = [
+        "kelor", "kopi arabika", "kopi robusta", "kopi", "jahe merah", "jahe",
+        "kunyit", "temulawak", "serai", "sereh", "sambiloto", "kayu manis",
+        "daun salam", "sirih merah", "sirih", "pegagan", "meniran", "mengkudu",
+        "jambu biji", "lidah buaya", "kumis kucing", "seledri", "kemangi",
+        "kencur", "lengkuas", "bawang putih", "bawang merah", "cengkeh",
+        "pala", "kapulaga", "rosella", "mahkota dewa", "binahong", "brotowali",
+        "belimbing wuluh", "alpukat", "sirsak", "pepaya", "manggis", "jeruk nipis",
+    ]
+
+    for name in sorted(common_names, key=len, reverse=True):
+        name_key = _normalise_lookup_key(name)
+        if re.search(rf"(?<![a-z0-9]){re.escape(name_key)}(?![a-z0-9])", title_key):
+            return " ".join(word.capitalize() for word in name.split())
+
+    return ""
+
+
 def _extract_plant_name_from_title(article_title, latin_name=""):
     """
     Mengambil nama tanaman dari judul artikel sebagai fallback.
@@ -615,6 +700,12 @@ def _extract_plant_name_from_title(article_title, latin_name=""):
             candidate = _clean_plant_name_candidate(match.group(1))
             if candidate:
                 return candidate
+
+    # Judul seperti "Analisis Senyawa Bioaktif Daun Kelor" atau
+    # "Aktivitas Antioksidan Kopi" ditangani melalui nama gambar/daftar umum.
+    title_plant = _plant_name_from_title_and_assets(title)
+    if title_plant:
+        return title_plant
 
     return ""
 
@@ -1236,6 +1327,10 @@ def extract_entities_from_document(document):
         "Sumber Data": source_data,
         "Kategori Penyakit": missing,
         "Gambar": "Belum terdeteksi",
+        # Metadata internal untuk pencarian gambar; tidak dibuat sebagai kotak output.
+        "Judul Artikel": article_title,
+        "Penulis Artikel": authors,
+        "Tahun Artikel": year,
         "Mode Ekstraksi": "Dokumen langsung tanpa Excel",
     }
     result["Ringkasan Bioaktif"] = build_bioactive_summary(result)
@@ -1388,33 +1483,88 @@ def extract_result(row, input_text, df):
 
 
 def find_plant_image(result):
-    image_value = result.get("Gambar", "")
-    plant_name = result.get("Nama Tanaman", "")
-    candidates = []
+    """
+    Mencari gambar secara toleran berdasarkan:
+    1. Isi kolom Gambar.
+    2. Nama tanaman.
+    3. Nama lokal/daerah.
+    4. Nama Latin.
+    5. Judul artikel (untuk upload dokumen).
 
-    if image_value and image_value != "Belum terdeteksi":
-        candidates.extend([
-            image_value,
-            os.path.join(ASSET_DIR, image_value),
-            os.path.join("gambar", image_value),
-            os.path.join("images", image_value),
-        ])
+    Pencarian tidak membedakan huruf besar/kecil, spasi, tanda hubung,
+    atau garis bawah. Gambar tetap hanya sebagai pendukung tampilan.
+    """
+    image_value = str(result.get("Gambar", "") or "").strip()
 
-    slug = slugify_filename(plant_name)
-    if slug:
-        for extension in ["jpg", "jpeg", "png", "webp"]:
-            candidates.extend([
-                os.path.join(ASSET_DIR, f"{slug}.{extension}"),
-                os.path.join("gambar", f"{slug}.{extension}"),
-                os.path.join("images", f"{slug}.{extension}"),
-                f"{slug}.{extension}",
-            ])
+    # Prioritas pertama: path yang ditulis langsung pada dataset.
+    if image_value and not _is_missing_value(image_value):
+        direct_candidates = [
+            Path(image_value),
+            Path(ASSET_DIR) / image_value,
+            Path("gambar") / image_value,
+            Path("images") / image_value,
+        ]
+        for candidate in direct_candidates:
+            if candidate.exists() and candidate.is_file():
+                return str(candidate)
 
-    for path in candidates:
-        if path and os.path.exists(path):
-            return path
+    lookup_values = [
+        result.get("Nama Tanaman", ""),
+        result.get("Nama Lokal/Daerah", ""),
+        result.get("Nama Latin", ""),
+        result.get("Judul Artikel", ""),
+        result.get("Sumber Data", ""),
+    ]
+    lookup_keys = [
+        _normalise_lookup_key(value)
+        for value in lookup_values
+        if value and not _is_missing_value(value)
+    ]
+    lookup_keys = [key for key in lookup_keys if key]
 
-    return None
+    if not lookup_keys:
+        return None
+
+    best_path = None
+    best_score = 0
+
+    for image_path in _available_plant_images():
+        stem_key = _normalise_lookup_key(image_path.stem)
+        if not stem_key:
+            continue
+
+        stem_tokens = set(stem_key.split())
+
+        for lookup_key in lookup_keys:
+            lookup_tokens = set(lookup_key.split())
+            score = 0
+
+            if stem_key == lookup_key:
+                score = 200
+            elif re.search(
+                rf"(?<![a-z0-9]){re.escape(stem_key)}(?![a-z0-9])",
+                lookup_key,
+            ):
+                score = 170 + len(stem_key)
+            elif re.search(
+                rf"(?<![a-z0-9]){re.escape(lookup_key)}(?![a-z0-9])",
+                stem_key,
+            ):
+                score = 150 + len(lookup_key)
+            elif stem_tokens and stem_tokens.issubset(lookup_tokens):
+                score = 125 + len(stem_tokens) * 5
+            else:
+                overlap = len(stem_tokens & lookup_tokens)
+                union = len(stem_tokens | lookup_tokens)
+                similarity = overlap / union if union else 0
+                if similarity >= 0.50:
+                    score = int(80 + similarity * 40)
+
+            if score > best_score:
+                best_score = score
+                best_path = image_path
+
+    return str(best_path) if best_path else None
 
 
 
@@ -2768,9 +2918,12 @@ def render_image_section(result, image_path):
             st.write("**Nama Tanaman:**", result.get("Nama Tanaman", ""))
             st.write("**Nama Latin:**", result.get("Nama Latin", ""))
     else:
-        st.info(
-            "Gambar belum ditemukan. Simpan gambar di folder assets, "
-            "contoh: assets/serai.jpg. Entitas dokumen tetap diambil dari artikel."
+        plant_name = result.get("Nama Tanaman", "tanaman")
+        suggested_name = slugify_filename(plant_name) or "nama_tanaman"
+        st.warning(
+            "Gambar belum ditemukan. Pastikan file gambar sudah diunggah ke GitHub "
+            f"pada folder assets, misalnya assets/{suggested_name}.jpg. "
+            "Nama file boleh menggunakan huruf kecil, spasi, tanda hubung, atau garis bawah."
         )
 
 
