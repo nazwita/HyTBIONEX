@@ -16,6 +16,7 @@ import plotly.express as px
 # KONFIGURASI APLIKASI
 # =========================================================
 APP_TITLE = "HyTBIONEX"
+APP_BUILD = "KARTU-BIOAKTIF-FINAL-2026-07-17"
 PREFERRED_DATASET = "Data set 20098+ Gambar.xlsx"
 ASSET_DIR = "assets"
 
@@ -557,6 +558,10 @@ def _clean_plant_name_candidate(value):
         "abstract", "abstrak", "introduction", "pendahuluan", "result",
         "results", "discussion", "conclusion", "method", "methods",
         "article", "journal", "research", "study", "penelitian",
+        "radikal bebas", "free radical", "antioksidan", "antioxidant",
+        "aktivitas antioksidan", "antioxidant activity",
+        "senyawa bioaktif", "bioactive compound", "bioactive compounds",
+        "ekstrak", "extract", "ekstrak daun", "leaf extract",
     }
 
     if not value or value.casefold() in blocked:
@@ -814,6 +819,26 @@ def build_therapeutic_conclusion(result):
         f"{plant} belum terdeteksi."
     )
 
+
+LATIN_TO_COMMON_PLANT = {
+    "moringa oleifera": "Kelor",
+    "syzygium aromaticum": "Cengkeh",
+    "zingiber officinale": "Jahe",
+    "curcuma longa": "Kunyit",
+    "cymbopogon nardus": "Serai",
+    "cymbopogon citratus": "Serai",
+    "cinnamomum burmannii": "Kayu Manis",
+    "allium sativum": "Bawang Putih",
+    "piper betle": "Sirih",
+    "coffea arabica": "Kopi Arabika",
+    "coffea canephora": "Kopi Robusta",
+}
+
+
+def _common_name_from_latin(latin_name):
+    latin_key = clean_text(latin_name)
+    return LATIN_TO_COMMON_PLANT.get(latin_key, "")
+
 def _extract_plant_name_from_document_context(document, latin_name=""):
     """
     Mengambil nama tanaman terutama dari judul artikel, bagian awal artikel,
@@ -835,6 +860,7 @@ def _extract_plant_name_from_document_context(document, latin_name=""):
     candidates.append(" ".join(header_lines[:12]))
     candidates.append(filename_stem)
 
+    # Prioritas pertama: nama umum yang jelas pada judul atau file gambar.
     for candidate in candidates:
         if not candidate:
             continue
@@ -842,6 +868,16 @@ def _extract_plant_name_from_document_context(document, latin_name=""):
         name = _plant_name_from_title_and_assets(candidate)
         if name:
             return name
+
+    # Prioritas kedua: pemetaan nama Latin ke nama tanaman umum.
+    mapped_name = _common_name_from_latin(latin_name)
+    if mapped_name:
+        return mapped_name
+
+    # Prioritas ketiga: pola bahasa dalam judul.
+    for candidate in candidates:
+        if not candidate:
+            continue
 
         name = _extract_plant_name_from_title(candidate, latin_name)
         if name:
@@ -1369,10 +1405,12 @@ def _rank_and_summarise_points(candidates, cue_terms, max_points=1):
 
 
 
+
 def _extract_preparation(text):
     """
-    Mengambil cara pengolahan secara langsung dari artikel.
-    Hanya satu nilai utama yang ditampilkan, tanpa nomor atau poin ringkasan.
+    Mengambil satu cara pengolahan yang disebutkan langsung dalam dokumen.
+    Hasil berupa teks pendek, tanpa nomor, tanpa poin, dan tanpa label
+    'ringkasan artikel'.
     """
     labels = [
         "cara pengolahan",
@@ -1399,12 +1437,12 @@ def _extract_preparation(text):
     labelled = _capture_label_value(
         text,
         labels,
-        max_length=150,
+        max_length=110,
     )
+
     if labelled:
-        return _clean_sentence_value(
-            _compact_article_point(labelled, max_chars=120)
-        )
+        value = _clean_sentence_value(labelled)
+        return value[:110].rstrip(" ,;:.-")
 
     for sentence in _sentences(text):
         lower = sentence.casefold()
@@ -1415,14 +1453,13 @@ def _extract_preparation(text):
         ):
             continue
 
-        value = _compact_article_point(
-            sentence,
-            max_chars=120,
-        )
+        value = _remove_article_citations(sentence)
         value = _clean_sentence_value(value)
 
-        if value:
-            return value
+        if len(value) > 110:
+            value = value[:110].rsplit(" ", 1)[0]
+
+        return value.rstrip(" ,;:.-")
 
     return ""
 
@@ -1430,8 +1467,8 @@ def _extract_preparation(text):
 
 def _extract_composition_dose(text):
     """
-    Mengambil satu komposisi, konsentrasi, atau dosis secara langsung.
-    Hasil tidak diberi nomor dan tidak dibuat sebagai poin ringkasan.
+    Mengambil satu komposisi, konsentrasi, atau dosis yang tertulis langsung
+    dalam dokumen. Hasil singkat, tanpa nomor dan tanpa poin ringkasan.
     """
     labels = [
         "komposisi/dosis",
@@ -1447,16 +1484,6 @@ def _extract_composition_dose(text):
         "treatment dose",
     ]
 
-    cue_terms = [
-        "dosis", "dose", "dosage",
-        "komposisi", "composition",
-        "konsentrasi", "concentration",
-        "ekstrak", "extract",
-        "larutan", "solution",
-        "diberikan", "administered",
-        "formulasi", "formulation",
-    ]
-
     unit_pattern = re.compile(
         r"\b\d+(?:[.,]\d+)?\s*"
         r"(?:mg|g|kg|µg|μg|mcg|mL|ml|L|%|ppm|"
@@ -1468,33 +1495,24 @@ def _extract_composition_dose(text):
     labelled = _capture_label_value(
         text,
         labels,
-        max_length=150,
+        max_length=100,
     )
+
     if labelled:
-        return _clean_sentence_value(
-            _compact_article_point(labelled, max_chars=110)
-        )
+        value = _clean_sentence_value(labelled)
+        return value[:100].rstrip(" ,;:.-")
 
     for sentence in _sentences(text):
-        lower = sentence.casefold()
-
         if not unit_pattern.search(sentence):
             continue
 
-        if not any(
-            cue.casefold() in lower
-            for cue in cue_terms
-        ):
-            continue
-
-        value = _compact_article_point(
-            sentence,
-            max_chars=110,
-        )
+        value = _remove_article_citations(sentence)
         value = _clean_sentence_value(value)
 
-        if value:
-            return value
+        if len(value) > 100:
+            value = value[:100].rsplit(" ", 1)[0]
+
+        return value.rstrip(" ,;:.-")
 
     return ""
 
@@ -2782,6 +2800,7 @@ else:
 css_styles = """<style>
 .stApp {
     background: #f5fbf7;
+    font-family: "Poppins", "Segoe UI", "Trebuchet MS", Arial, sans-serif;
 }
 .main .block-container {
     padding-top: 1rem;
@@ -2877,10 +2896,12 @@ css_styles = """<style>
 }
 .section-title {
     color: #064e3b;
-    font-size: 1.55rem;
+    font-size: 1.6rem;
     font-weight: 900;
+    letter-spacing: -0.02em;
     margin-top: 1.25rem;
-    margin-bottom: 0.75rem;
+    margin-bottom: 0.85rem;
+    font-family: "Poppins", "Segoe UI", "Trebuchet MS", Arial, sans-serif;
 }
 [data-testid="stMetric"] {
     background: white;
@@ -2898,24 +2919,66 @@ css_styles = """<style>
     font-weight: 900;
 }
 .result-card {
-    background: #ffffff;
-    border-left: 0.42rem solid #047857;
-    border-radius: 0.9rem;
-    padding: 1rem;
-    min-height: 118px;
-    box-shadow: 0 8px 18px rgba(15,23,42,0.08);
-    margin-bottom: 0.75rem;
+    background: linear-gradient(145deg, #ffffff 0%, #fbfffd 100%);
+    border-left: 0.42rem solid #059669;
+    border-radius: 1rem;
+    padding: 1.05rem 1.1rem;
+    min-height: 122px;
+    box-shadow: 0 10px 24px rgba(15,23,42,0.09);
+    margin-bottom: 0.8rem;
+    transition: transform 0.18s ease, box-shadow 0.18s ease;
+    font-family: "Poppins", "Segoe UI", "Trebuchet MS", Arial, sans-serif;
 }
-.result-card h4 {
-    color: #064e3b;
+.result-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 14px 30px rgba(15,23,42,0.13);
+}
+.result-card-title {
+    color: #065f46;
+    font-size: 1.02rem;
+    font-weight: 850;
+    line-height: 1.28;
+    letter-spacing: 0.01em;
+    margin-bottom: 0.72rem;
+}
+.result-card-value {
+    color: #1f2937;
+    font-size: 0.96rem;
+    font-weight: 500;
+    line-height: 1.55;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+}
+.result-card.bioactive-card,
+.result-card.activity-card {
+    background: linear-gradient(145deg, #fffaf0 0%, #fff7e6 100%);
+    border: 2px solid #fdba74;
+    border-left: 0.52rem solid #fb923c;
+}
+.result-card.bioactive-card .result-card-title,
+.result-card.activity-card .result-card-title {
+    color: #9a3412;
     font-weight: 900;
-    margin: 0 0 0.45rem 0;
 }
-.result-card p {
-    color: #0f172a;
-    font-size: 0.98rem;
-    line-height: 1.45;
-    margin: 0;
+.result-card.bioactive-card .result-card-value,
+.result-card.activity-card .result-card-value {
+    color: #7c2d12;
+    font-weight: 600;
+}
+.result-card.disease-card {
+    background: linear-gradient(145deg, #fef2f2 0%, #fff7f7 100%);
+    border-left-color: #e11d48;
+}
+.result-card.disease-card .result-card-title {
+    color: #9f1239;
+}
+.result-card.note-card {
+    background: linear-gradient(145deg, #f0fdf4 0%, #f8fffa 100%);
+    border-left-color: #16a34a;
+}
+.result-card.note-card .result-card-value {
+    font-size: 1rem;
+    font-weight: 550;
 }
 .info-box {
     background: #f3e8ff;
@@ -3034,17 +3097,6 @@ textarea {
     line-height: 1.65;
     overflow-wrap: anywhere;
 }
-.result-card.bioactive-card {
-    background: linear-gradient(135deg, #fff7ed, #fffbeb);
-    border-left-color: #f97316;
-    border: 2px solid #fdba74;
-    border-left-width: 0.55rem;
-}
-.result-card.bioactive-card h4 {
-    color: #9a3412;
-}
-
-
 .bioactive-summary-text {
     color: #1f2937;
     font-size: 1.05rem;
@@ -3457,119 +3509,140 @@ def render_analysis_form(prefix, allow_text=True, allow_upload=True):
 
 
 
-def build_excel_result_dataframe(result):
-    """
-    Menyusun satu baris hasil dengan judul kolom yang sama seperti dataset Excel.
-    """
-    return pd.DataFrame([{
-        "Nama_Tanaman": result.get(
-            "Nama Tanaman",
-            "Belum terdeteksi",
-        ),
-        "Nama_Lokal/ Daerah": result.get(
-            "Nama Lokal/Daerah",
-            "Belum terdeteksi",
-        ),
-        "Nama_Latin": result.get(
-            "Nama Latin",
-            "Belum terdeteksi",
-        ),
-        "Bagian_Tanaman": result.get(
-            "Bagian Tanaman",
-            "Belum terdeteksi",
-        ),
-        "Zat Bioaktif": result.get(
-            "Zat Bioaktif",
-            "Belum terdeteksi",
-        ),
-        "Khasiat_Efek_Terapeutik": result.get(
-            "Khasiat/Efek Terapeutik",
-            "Belum terdeteksi",
-        ),
-        "Kategori_Penyakit": result.get(
-            "Kategori Penyakit",
-            "Belum terdeteksi",
-        ),
-        "Komposisi /Dosis": result.get(
-            "Komposisi/Dosis",
-            "Belum terdeteksi",
-        ),
-        "Cara_Pengolahan": result.get(
-            "Cara Pengolahan",
-            "Belum terdeteksi",
-        ),
-        "Keterangan": result.get(
-            "Keterangan",
-            "Belum terdeteksi",
-        ),
-        "Sumber_Data": result.get(
-            "Sumber Data",
-            "Belum terdeteksi",
-        ),
-    }])
 
 
 def render_result_cards(result):
+    """
+    Menampilkan hasil ekstraksi dalam bentuk kartu hijau-putih dengan
+    Zat Bioaktif dan Aktivitas Biologis sebagai fokus berwarna oranye.
+
+    Susunan:
+    Baris 1:
+    - Senyawa Bioaktif
+    - Aktivitas Biologis / Efek Terapeutik
+    - Nama Tanaman
+
+    Baris 2:
+    - Nama Latin
+    - Nama Lokal/Daerah
+    - Bagian Tanaman
+
+    Baris 3:
+    - Cara Pengolahan
+    - Komposisi/Dosis
+    - Sumber Data
+
+    Baris 4:
+    - Kategori Penyakit
+    - Keterangan
+    """
+
     st.markdown(
         '<div class="section-title">'
-        '📋 Bioaktif Informasi Ekstraksi — Sesuai Kolom Dataset'
+        '📋 Bioaktif Informasi Ekstraksi'
         '</div>',
         unsafe_allow_html=True,
     )
 
-    result_df = build_excel_result_dataframe(result)
+    def show_card(column, title, value, icon, extra_class=""):
+        value = value if value not in (None, "") else "Belum terdeteksi"
 
-    st.dataframe(
-        result_df,
-        use_container_width=True,
-        hide_index=True,
-        height=190,
-        column_config={
-            "Nama_Tanaman": st.column_config.TextColumn(
-                "Nama_Tanaman",
-                width="medium",
-            ),
-            "Nama_Lokal/ Daerah": st.column_config.TextColumn(
-                "Nama_Lokal/ Daerah",
-                width="medium",
-            ),
-            "Nama_Latin": st.column_config.TextColumn(
-                "Nama_Latin",
-                width="medium",
-            ),
-            "Bagian_Tanaman": st.column_config.TextColumn(
-                "Bagian_Tanaman",
-                width="medium",
-            ),
-            "Zat Bioaktif": st.column_config.TextColumn(
-                "Zat Bioaktif",
-                width="large",
-            ),
-            "Khasiat_Efek_Terapeutik": st.column_config.TextColumn(
-                "Khasiat_Efek_Terapeutik",
-                width="large",
-            ),
-            "Kategori_Penyakit": st.column_config.TextColumn(
-                "Kategori_Penyakit",
-                width="large",
-            ),
-            "Komposisi /Dosis": st.column_config.TextColumn(
-                "Komposisi /Dosis",
-                width="large",
-            ),
-            "Cara_Pengolahan": st.column_config.TextColumn(
-                "Cara_Pengolahan",
-                width="large",
-            ),
-            "Keterangan": st.column_config.TextColumn(
-                "Keterangan",
-                width="large",
-            ),
-            "Sumber_Data": st.column_config.TextColumn(
-                "Sumber_Data",
-                width="large",
-            ),
-        },
+        with column:
+            st.markdown(
+                f"""<div class="result-card {extra_class}">
+<div class="result-card-title">{icon} {safe_text(title)}</div>
+<div class="result-card-value">{safe_text(value)}</div>
+</div>""",
+                unsafe_allow_html=True,
+            )
+
+    # Baris 1: fokus utama bioaktif.
+    row_1 = st.columns(3)
+
+    show_card(
+        row_1[0],
+        "SENYAWA BIOAKTIF",
+        result.get("Zat Bioaktif", "Belum terdeteksi"),
+        "🧪",
+        "bioactive-card",
+    )
+    show_card(
+        row_1[1],
+        "AKTIVITAS BIOLOGIS / EFEK TERAPEUTIK",
+        result.get(
+            "Khasiat/Efek Terapeutik",
+            "Belum terdeteksi",
+        ),
+        "💚",
+        "activity-card",
+    )
+    show_card(
+        row_1[2],
+        "Nama Tanaman",
+        result.get("Nama Tanaman", "Belum terdeteksi"),
+        "🌿",
+    )
+
+    # Baris 2: identitas tanaman.
+    row_2 = st.columns(3)
+
+    show_card(
+        row_2[0],
+        "Nama Latin",
+        result.get("Nama Latin", "Belum terdeteksi"),
+        "🔬",
+    )
+    show_card(
+        row_2[1],
+        "Nama Lokal/Daerah",
+        result.get("Nama Lokal/Daerah", "Belum terdeteksi"),
+        "🇮🇩",
+    )
+    show_card(
+        row_2[2],
+        "Bagian Tanaman",
+        result.get("Bagian Tanaman", "Belum terdeteksi"),
+        "🍃",
+    )
+
+    # Baris 3: penggunaan dan sumber.
+    row_3 = st.columns(3)
+
+    show_card(
+        row_3[0],
+        "Cara Pengolahan",
+        result.get("Cara Pengolahan", "Belum terdeteksi"),
+        "☕",
+    )
+    show_card(
+        row_3[1],
+        "Komposisi/Dosis",
+        result.get("Komposisi/Dosis", "Belum terdeteksi"),
+        "⚖️",
+    )
+    show_card(
+        row_3[2],
+        "Sumber Data",
+        result.get("Sumber Data", "Belum terdeteksi"),
+        "📚",
+    )
+
+    # Baris 4: tambahan sesuai permintaan.
+    row_4 = st.columns([1, 2])
+
+    show_card(
+        row_4[0],
+        "Kategori Penyakit",
+        result.get("Kategori Penyakit", "Belum terdeteksi"),
+        "🩺",
+        "disease-card",
+    )
+    show_card(
+        row_4[1],
+        "Keterangan",
+        result.get("Keterangan", "Belum terdeteksi"),
+        "📝",
+        "note-card",
     )
 
 
