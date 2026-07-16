@@ -16,7 +16,7 @@ import plotly.express as px
 # KONFIGURASI APLIKASI
 # =========================================================
 APP_TITLE = "HyTBIONEX"
-PREFERRED_DATASET = "Data set 20098+ Gambar.xlsx"
+PREFERRED_DATASET = "DAta 20098 ok.xlsx"
 ASSET_DIR = "assets"
 
 st.set_page_config(
@@ -3816,9 +3816,7 @@ def render_about_page():
         mengintegrasikan, dan memvisualisasikan informasi bioaktif tanaman herbal Indonesia.
         Sistem ini menghubungkan entitas nama tanaman, nama Latin, nama lokal atau daerah, 
         bagian tanaman, senyawa bioaktif, aktivitas biologis atau efek terapeutik, cara pengolahan, 
-        dosis atau komposisi, serta sumber data ke dalam HerbKG 2.0. Pada input dokumen,
-        sumber data diperoleh secara langsung dari judul artikel, nama penulis,  dan tahun publikasi, 
-        sehingga setiap informasi yang diekstraksi dapat ditelusuri kembali secara terstruktur dan berbasis bukti ilmiah.
+        dosis atau komposisi, serta sumber data ke dalam HerbKG 2.0. 
 
         **Pipeline:** Input → Preprocessing → Adaptive Fine Tuning → BIE → NED → Hybrid Transformer → BRE 
         → HerbKG 2.0 → Aplikasi Downstream.
