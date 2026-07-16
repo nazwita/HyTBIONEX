@@ -16,7 +16,7 @@ import plotly.express as px
 # KONFIGURASI APLIKASI
 # =========================================================
 APP_TITLE = "HyTBIONEX"
-PREFERRED_DATASET = "Dataset_herbal_tambah.xlsx"
+PREFERRED_DATASET = "Data set 20098+ Gambar.xlsx"
 ASSET_DIR = "assets"
 
 st.set_page_config(
@@ -2191,26 +2191,25 @@ else:
         "linear-gradient(135deg, #ffffff 0%, #ecfdf5 55%, #f8fafc 100%)"
     )
 
-st.markdown(
-    f"""<style>
-.stApp {{
+css_styles = """<style>
+.stApp {
     background: #f5fbf7;
-}}
-.main .block-container {{
+}
+.main .block-container {
     padding-top: 1rem;
     max-width: 1500px;
-}}
-[data-testid="stSidebar"] {{
+}
+[data-testid="stSidebar"] {
     background:
         radial-gradient(circle at bottom left, rgba(34,197,94,0.25), transparent 28%),
         radial-gradient(circle at top right, rgba(16,185,129,0.18), transparent 35%),
         linear-gradient(180deg, #021f16 0%, #043b2c 45%, #065f46 100%);
     border-right: 1px solid rgba(255,255,255,0.12);
-}}
-[data-testid="stSidebar"] * {{
+}
+[data-testid="stSidebar"] * {
     color: #f8fff8;
-}}
-[data-testid="stSidebar"] .stButton > button {{
+}
+[data-testid="stSidebar"] .stButton > button {
     background: transparent;
     color: #f8fff8;
     border: none;
@@ -2222,12 +2221,12 @@ st.markdown(
     font-weight: 650;
     margin-bottom: 0.2rem;
     width: 100%;
-}}
-[data-testid="stSidebar"] .stButton > button:hover {{
+}
+[data-testid="stSidebar"] .stButton > button:hover {
     background: rgba(255,255,255,0.12);
     color: #ffffff;
-}}
-.nav-active {{
+}
+.nav-active {
     background: linear-gradient(90deg, rgba(34,197,94,0.38), rgba(16,185,129,0.20));
     border: 1px solid rgba(134,239,172,0.28);
     border-radius: 0.8rem;
@@ -2235,82 +2234,82 @@ st.markdown(
     margin-bottom: 0.3rem;
     color: #ffffff;
     font-weight: 800;
-}}
-.sidebar-section-title {{
+}
+.sidebar-section-title {
     color: #86efac;
     font-size: 0.75rem;
     font-weight: 900;
     letter-spacing: 0.08rem;
     margin-top: 1.25rem;
     margin-bottom: 0.45rem;
-}}
-.sidebar-line {{
+}
+.sidebar-line {
     height: 1px;
     background: rgba(255,255,255,0.14);
     margin: 1rem 0;
-}}
-.top-header {{
+}
+.top-header {
     background: linear-gradient(135deg, #013220, #064e3b, #065f46);
     padding: 1.4rem 1.7rem;
     border-radius: 0 0 1.6rem 1.6rem;
     color: white;
     margin-bottom: 1.25rem;
     box-shadow: 0 16px 38px rgba(0,0,0,0.18);
-}}
-.top-header h1 {{
+}
+.top-header h1 {
     margin: 0;
     color: white;
     font-size: 2.1rem;
     font-weight: 900;
-}}
-.top-header p {{
+}
+.top-header p {
     margin: 0.35rem 0 0;
     color: #d1fae5;
-}}
-.hero-banner {{
-    background: {hero_background_css};
+}
+.hero-banner {
+    background: __HERO_BACKGROUND__;
     background-size: cover;
     background-position: center;
     padding: 2rem;
     border-radius: 1.35rem;
     min-height: 220px;
     box-shadow: inset 0 0 0 1px rgba(6,78,59,0.08);
-}}
-.hero-banner h2 {{
+}
+.hero-banner h2 {
     color: #047857;
     font-size: 1.85rem;
     font-weight: 900;
     margin-bottom: 0.8rem;
-}}
-.hero-banner p {{
+}
+.hero-banner p {
     color: #12372a;
     font-size: 1rem;
     line-height: 1.65;
     max-width: 700px;
-}}
-.section-title {{
+}
+.section-title {
     color: #064e3b;
     font-size: 1.55rem;
     font-weight: 900;
     margin-top: 1.25rem;
     margin-bottom: 0.75rem;
-}}
-[data-testid="stMetric"] {{
+}
+[data-testid="stMetric"] {
     background: white;
     border: 1px solid rgba(6,78,59,0.10);
     border-radius: 1rem;
     padding: 1rem;
     box-shadow: 0 8px 20px rgba(15,23,42,0.07);
-}}
-[data-testid="stMetricLabel"] {{
+}
+[data-testid="stMetricLabel"] {
     color: #065f46;
     font-weight: 800;
-}}
-[data-testid="stMetricValue"] {{
+}
+[data-testid="stMetricValue"] {
     color: #047857;
     font-weight: 900;
-}}
-.result-card {{
+}
+.result-card {
     background: #ffffff;
     border-left: 0.42rem solid #047857;
     border-radius: 0.9rem;
@@ -2318,47 +2317,47 @@ st.markdown(
     min-height: 118px;
     box-shadow: 0 8px 18px rgba(15,23,42,0.08);
     margin-bottom: 0.75rem;
-}}
-.result-card h4 {{
+}
+.result-card h4 {
     color: #064e3b;
     font-weight: 900;
     margin: 0 0 0.45rem 0;
-}}
-.result-card p {{
+}
+.result-card p {
     color: #0f172a;
     font-size: 0.98rem;
     line-height: 1.45;
     margin: 0;
-}}
-.info-box {{
+}
+.info-box {
     background: #f3e8ff;
     padding: 1rem;
     border-radius: 1rem;
     border: 1px solid #c084fc;
     color: #111827;
     margin-bottom: 1rem;
-}}
-.stButton > button {{
+}
+.stButton > button {
     background: linear-gradient(90deg, #047857, #059669);
     color: white;
     border: none;
     border-radius: 0.8rem;
     font-weight: 900;
-}}
-.stButton > button:hover {{
+}
+.stButton > button:hover {
     background: linear-gradient(90deg, #065f46, #047857);
     color: white;
-}}
-[data-testid="stFileUploader"] section {{
+}
+[data-testid="stFileUploader"] section {
     background: #fbfffb;
     border: 2px dashed #86efac;
     border-radius: 1rem;
-}}
-textarea {{
+}
+textarea {
     background: white !important;
     color: #0f172a !important;
-}}
-.quick-card {{
+}
+.quick-card {
     background: white;
     border-radius: 1rem;
     padding: 1rem;
@@ -2366,16 +2365,16 @@ textarea {{
     box-shadow: 0 8px 20px rgba(15,23,42,0.07);
     min-height: 160px;
     text-align: center;
-}}
-.quick-card h4 {{
+}
+.quick-card h4 {
     color: #064e3b;
     margin: 0.4rem 0;
-}}
-.quick-card p {{
+}
+.quick-card p {
     color: #475569;
     font-size: 0.88rem;
-}}
-.bioactive-main-card {{
+}
+.bioactive-main-card {
     background:
         radial-gradient(circle at top right, rgba(254,215,170,0.78), transparent 34%),
         linear-gradient(135deg, #fff7ed 0%, #fffbeb 52%, #ecfdf5 100%);
@@ -2386,27 +2385,27 @@ textarea {{
     margin-top: 1rem;
     margin-bottom: 1.25rem;
     box-shadow: 0 14px 32px rgba(249,115,22,0.15);
-}}
-.bioactive-main-card h2 {{
+}
+.bioactive-main-card h2 {
     color: #9a3412;
     font-size: 1.65rem;
     font-weight: 900;
     margin: 0 0 0.4rem 0;
-}}
-.bioactive-number {{
+}
+.bioactive-number {
     color: #ea580c;
     font-size: 2.9rem;
     font-weight: 900;
     line-height: 1;
     margin-top: 0.55rem;
-}}
-.bioactive-description {{
+}
+.bioactive-description {
     color: #475569;
     font-size: 0.98rem;
     line-height: 1.6;
     margin-top: 0.7rem;
-}}
-.bioactive-chip {{
+}
+.bioactive-chip {
     display: inline-block;
     background: #ffffff;
     color: #9a3412;
@@ -2416,8 +2415,8 @@ textarea {{
     margin: 0.35rem 0.25rem 0 0;
     font-size: 0.82rem;
     font-weight: 800;
-}}
-.bioactive-result {{
+}
+.bioactive-result {
     background: linear-gradient(135deg, #fff7ed 0%, #fffbeb 55%, #f0fdf4 100%);
     border: 2px solid #fb923c;
     border-left: 0.75rem solid #f97316;
@@ -2426,36 +2425,36 @@ textarea {{
     margin-top: 1rem;
     margin-bottom: 1.15rem;
     box-shadow: 0 12px 28px rgba(249,115,22,0.14);
-}}
-.bioactive-result h2 {{
+}
+.bioactive-result h2 {
     color: #9a3412;
     font-size: 1.45rem;
     font-weight: 900;
     margin: 0 0 0.7rem 0;
-}}
-.bioactive-compound {{
+}
+.bioactive-compound {
     color: #c2410c;
     font-size: 1.6rem;
     font-weight: 900;
     margin-bottom: 0.65rem;
     overflow-wrap: anywhere;
-}}
-.bioactive-relation {{
+}
+.bioactive-relation {
     color: #065f46;
     font-size: 1rem;
     font-weight: 700;
     line-height: 1.65;
     overflow-wrap: anywhere;
-}}
-.result-card.bioactive-card {{
+}
+.result-card.bioactive-card {
     background: linear-gradient(135deg, #fff7ed, #fffbeb);
     border-left-color: #f97316;
     border: 2px solid #fdba74;
     border-left-width: 0.55rem;
-}}
-.result-card.bioactive-card h4 {{
+}
+.result-card.bioactive-card h4 {
     color: #9a3412;
-}}
+}
 
 
 .bioactive-summary-text {
@@ -2475,7 +2474,16 @@ textarea {{
     margin-top: 0.8rem;
 }
 
-</style>""",
+</style>"""
+
+# Masukkan background dinamis tanpa memakai f-string pada CSS.
+css_styles = css_styles.replace(
+    "__HERO_BACKGROUND__",
+    hero_background_css,
+)
+
+st.markdown(
+    css_styles,
     unsafe_allow_html=True,
 )
 
