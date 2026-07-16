@@ -16,7 +16,7 @@ import plotly.express as px
 # KONFIGURASI APLIKASI
 # =========================================================
 APP_TITLE = "HyTBIONEX"
-PREFERRED_DATASET = "Data set 20098+ Gambar.xlsx"
+PREFERRED_DATASET = "Dataset_herbal_tambah.xlsx"
 ASSET_DIR = "assets"
 
 st.set_page_config(
