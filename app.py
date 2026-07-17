@@ -1717,65 +1717,406 @@ def get_column_map(df):
     }
 
 
-def score_row(row, search_text, columns):
-    score = 0
-    search_text = clean_text(search_text)
 
-    fields = [
-        ("nama", 200, 30, 3),
-        ("latin", 180, 24, 4),
-        ("lokal", 120, 20, 3),
+RELATION_QUERY_STOPWORDS = {
+    "apa", "apakah", "yang", "untuk", "dari", "dengan", "dan", "atau",
+    "nama", "tanaman", "herbal", "obat", "bisa", "dapat", "digunakan",
+    "gunakan", "membantu", "mengatasi", "mengobati", "terkait", "cocok",
+    "rekomendasi", "carikan", "tampilkan", "informasi", "sakit",
+    "penyakit", "khasiat", "efek", "terapeutik", "zat", "bioaktif",
+    "senyawa", "bagian", "lokal", "daerah", "latin", "sebagai",
+    "adalah", "ini", "itu", "saya", "orang", "penderita",
+}
+
+
+
+RELATION_QUERY_SYNONYMS = {
+    # Kanker dan tumor
+    "kanker": [
+        "kanker", "cancer", "tumor", "antikanker", "anticancer",
+        "sitotoksik", "cytotoxic", "antitumor",
+    ],
+
+    # Gangguan pernapasan
+    "batuk": [
+        "batuk", "cough", "antitusif", "antitussive",
+        "ekspektoran", "expectorant",
+    ],
+    "asma": [
+        "asma", "asthma", "antiasma", "bronchodilator",
+        "bronkodilator", "gangguan pernapasan",
+    ],
+    "flu": [
+        "flu", "influenza", "pilek", "common cold",
+        "antivirus", "antiviral",
+    ],
+
+    # Nyeri dan demam
+    "sakit kepala": [
+        "sakit kepala", "nyeri kepala", "headache",
+        "analgesik", "analgesic", "antinyeri",
+    ],
+    "nyeri": [
+        "nyeri", "pain", "analgesik", "analgesic", "antinyeri",
+    ],
+    "demam": [
+        "demam", "fever", "panas", "antipiretik", "antipyretic",
+    ],
+
+    # Pencernaan
+    "diare": [
+        "diare", "diarrhea", "antidiare", "antidiarrheal",
+        "disentri", "gangguan pencernaan",
+    ],
+    "sakit perut": [
+        "sakit perut", "nyeri perut", "abdominal pain",
+        "gangguan pencernaan", "maag", "gastritis",
+        "kembung", "mual", "gastroprotektif",
+    ],
+    "maag": [
+        "maag", "gastritis", "asam lambung", "nyeri lambung",
+        "gastroprotektif", "gastroprotective", "antiulser",
+        "antiulcer",
+    ],
+    "sembelit": [
+        "sembelit", "konstipasi", "constipation", "laksatif",
+        "laxative",
+    ],
+
+    # Metabolik
+    "diabetes": [
+        "diabetes", "diabetes mellitus", "gula darah",
+        "hiperglikemia", "hyperglycemia", "antidiabetes",
+        "antidiabetic", "hipoglikemik", "hypoglycemic",
+    ],
+    "kolesterol": [
+        "kolesterol", "cholesterol", "hiperlipidemia",
+        "hyperlipidemia", "antihiperlipidemia",
+        "antihyperlipidemic",
+    ],
+    "asam urat": [
+        "asam urat", "gout", "hiperurisemia", "hyperuricemia",
+        "antihiperurisemia",
+    ],
+    "obesitas": [
+        "obesitas", "obesity", "antiobesitas", "anti-obesity",
+    ],
+
+    # Kardiovaskular
+    "hipertensi": [
+        "hipertensi", "darah tinggi", "hypertension",
+        "antihipertensi", "antihypertensive",
+    ],
+    "jantung": [
+        "jantung", "penyakit jantung", "heart disease",
+        "kardiovaskular", "cardiovascular", "kardioprotektif",
+        "cardioprotective",
+    ],
+
+    # Ginjal dan hati
+    "ginjal": [
+        "ginjal", "penyakit ginjal", "kidney disease",
+        "renal", "nefroprotektif", "nephroprotective",
+        "batu ginjal", "kidney stone",
+    ],
+    "hati": [
+        "penyakit hati", "gangguan hati", "liver disease",
+        "hepatitis", "hepatoprotektif", "hepatoprotective",
+    ],
+
+    # Infeksi dan peradangan
+    "infeksi": [
+        "infeksi", "infection", "antimikroba", "antimicrobial",
+        "antibakteri", "antibacterial", "antijamur", "antifungal",
+    ],
+    "peradangan": [
+        "peradangan", "radang", "inflamasi", "inflammation",
+        "antiinflamasi", "anti-inflammatory", "anti inflammatory",
+    ],
+
+    # Kulit dan luka
+    "luka": [
+        "luka", "wound", "penyembuhan luka", "wound healing",
+        "antiseptik",
+    ],
+    "penyakit kulit": [
+        "penyakit kulit", "skin disease", "dermatitis",
+        "eksim", "eczema", "jerawat", "acne",
+    ],
+
+    # Sistem saraf dan daya tahan tubuh
+    "stres": [
+        "stres", "stress", "cemas", "anxiety",
+        "adaptogen", "sedatif", "sedative",
+    ],
+    "daya tahan tubuh": [
+        "daya tahan tubuh", "imunitas", "immune system",
+        "imunomodulator", "immunomodulatory",
+    ],
+}
+
+
+def _extract_relation_query_terms(search_text):
+    """
+    Mengambil istilah penting dari pertanyaan pengguna.
+
+    Sistem tidak hanya mencari kanker. Semua kata penyakit/keluhan yang
+    diketik tetap dicari langsung pada dataset. Kamus sinonim hanya membantu
+    memperluas istilah umum, misalnya jantung → kardiovaskular dan
+    ginjal → renal/nefroprotektif.
+    """
+    cleaned = clean_text(search_text)
+
+    if not cleaned:
+        return []
+
+    terms = []
+
+    # Prioritaskan frasa penyakit/khasiat yang sudah dikenal.
+    for canonical, variants in RELATION_QUERY_SYNONYMS.items():
+        all_variants = [canonical, *variants]
+
+        if any(
+            clean_text(variant) in cleaned
+            for variant in all_variants
+        ):
+            terms.extend(clean_text(variant) for variant in all_variants)
+
+    # Ambil token bermakna yang tidak termasuk kata tanya/kata umum.
+    meaningful_tokens = [
+        token
+        for token in cleaned.split()
+        if (
+            len(token) >= 3
+            and token not in RELATION_QUERY_STOPWORDS
+        )
+    ]
+    terms.extend(meaningful_tokens)
+
+    # Tambahkan gabungan dua kata untuk istilah seperti "darah tinggi".
+    for index in range(len(meaningful_tokens) - 1):
+        terms.append(
+            f"{meaningful_tokens[index]} "
+            f"{meaningful_tokens[index + 1]}"
+        )
+
+    return _unique_preserve_order(terms)
+
+
+def _prepare_relation_search_dataframe(df, columns):
+    """
+    Mengisi identitas tanaman yang kosong akibat format sel bertingkat
+    pada Excel. Pengisian dilakukan per sheet agar tidak tertukar.
+    """
+    working = df.copy()
+
+    identity_fields = [
+        "nama",
+        "lokal",
+        "latin",
+        "bagian",
+        "sumber",
     ]
 
-    for field, phrase_score, token_score, min_token_length in fields:
+    for field in identity_fields:
         column = columns.get(field)
-        value = clean_text(value_from_row(row, column))
 
-        if not value or value == "belum terdeteksi":
+        if not column or column not in working.columns:
             continue
 
-        values = split_multi_value(value) if field == "lokal" else [value]
+        working[column] = (
+            working[column]
+            .astype(str)
+            .replace({
+                "": pd.NA,
+                "nan": pd.NA,
+                "None": pd.NA,
+                "NaN": pd.NA,
+            })
+        )
 
-        for item in values:
-            if item and item in search_text:
-                score += phrase_score
+        if "__sheet_name__" in working.columns:
+            working[column] = (
+                working
+                .groupby("__sheet_name__", dropna=False)[column]
+                .ffill()
+            )
+        else:
+            working[column] = working[column].ffill()
 
-            for token in item.split():
-                if len(token) >= min_token_length and token in search_text:
-                    score += token_score
+        working[column] = working[column].fillna("")
+
+    return working
+
+
+def _relation_field_score(
+    field_value,
+    query_terms,
+    phrase_score,
+    token_score,
+):
+    value = clean_text(field_value)
+
+    if not value or value in {
+        "belum terdeteksi",
+        "tidak terdeteksi",
+        "tidak disebutkan dalam dokumen",
+        "nan",
+        "none",
+    }:
+        return 0
+
+    score = 0
+    value_tokens = set(value.split())
+
+    for term in query_terms:
+        term = clean_text(term)
+
+        if not term:
+            continue
+
+        if term == value:
+            score += phrase_score + 80
+            continue
+
+        if term in value:
+            score += phrase_score
+            continue
+
+        term_tokens = {
+            token
+            for token in term.split()
+            if len(token) >= 3
+        }
+
+        overlap = len(term_tokens & value_tokens)
+
+        if overlap:
+            score += token_score * overlap
 
     return score
 
 
+def score_row(row, search_text, columns):
+    """
+    Memberi skor berdasarkan hubungan pertanyaan dengan:
+    nama tanaman, nama lokal, nama Latin, kategori penyakit,
+    khasiat, zat bioaktif, dan keterangan.
+
+    Kategori penyakit diberi bobot tertinggi agar kalimat seperti
+    'Apa nama tanaman herbal untuk sakit kanker?' menemukan tanaman
+    yang pada dataset terkait dengan kanker.
+    """
+    query_terms = _extract_relation_query_terms(search_text)
+
+    if not query_terms:
+        return 0
+
+    field_weights = [
+        ("nama", 300, 45),
+        ("latin", 260, 38),
+        ("lokal", 240, 34),
+        ("penyakit", 360, 60),
+        ("khasiat", 310, 50),
+        ("senyawa", 270, 42),
+        ("keterangan", 220, 32),
+        ("bagian", 90, 14),
+        ("pengolahan", 70, 10),
+        ("dosis", 60, 8),
+    ]
+
+    score = 0
+
+    for field, phrase_score, token_score in field_weights:
+        column = columns.get(field)
+
+        if not column:
+            continue
+
+        score += _relation_field_score(
+            value_from_row(row, column),
+            query_terms,
+            phrase_score,
+            token_score,
+        )
+
+    # Tambahan skor untuk baris yang entitasnya lebih lengkap.
+    required_fields = [
+        "nama",
+        "lokal",
+        "latin",
+        "senyawa",
+        "khasiat",
+        "penyakit",
+        "pengolahan",
+        "dosis",
+        "keterangan",
+        "sumber",
+    ]
+
+    completeness_bonus = 0
+
+    for field in required_fields:
+        column = columns.get(field)
+        value = value_from_row(row, column)
+
+        if not _is_missing_value(value):
+            completeness_bonus += 4
+
+    return score + completeness_bonus
+
+
 def find_best_match(df, search_text):
+    """
+    Mencari satu relasi tanaman-bioaktif-penyakit yang paling sesuai
+    dengan nama tanaman, pertanyaan penyakit, khasiat, atau zat bioaktif.
+    """
     if df.empty:
         return None, "Dataset belum terbaca.", 0
 
-    search_text = clean_text(search_text)
-    if not search_text:
-        return None, "Input tanaman dan dokumen masih kosong.", 0
+    cleaned_query = clean_text(search_text)
+
+    if not cleaned_query:
+        return None, "Input tanaman atau kalimat masih kosong.", 0
 
     columns = get_column_map(df)
+    working_df = _prepare_relation_search_dataframe(df, columns)
+
     best_row = None
     best_score = 0
 
-    for _, row in df.iterrows():
-        current_score = score_row(row, search_text, columns)
+    for _, row in working_df.iterrows():
+        current_score = score_row(
+            row,
+            cleaned_query,
+            columns,
+        )
 
         if current_score > best_score:
             best_score = current_score
             best_row = row
 
-    if best_row is not None and best_score > 0:
-        nama = value_from_row(best_row, columns["nama"])
-        latin = value_from_row(best_row, columns["latin"])
-        status = (
-            f"Entitas cocok: {nama} / {latin} | Skor kecocokan: {best_score}"
+    if best_row is None or best_score <= 0:
+        return (
+            None,
+            "Tidak ditemukan hubungan tanaman, zat bioaktif, khasiat, "
+            "atau kategori penyakit yang sesuai pada dataset.",
+            0,
         )
-        return best_row, status, best_score
 
-    return None, "Tidak ditemukan kecocokan tanaman pada dataset.", 0
+    plant = value_from_row(best_row, columns.get("nama"))
+    latin = value_from_row(best_row, columns.get("latin"))
+    disease = value_from_row(best_row, columns.get("penyakit"))
+    activity = value_from_row(best_row, columns.get("khasiat"))
+    compound = value_from_row(best_row, columns.get("senyawa"))
 
+    status = (
+        f"Relasi bioaktif ditemukan: {plant} ({latin}) → "
+        f"{compound} → {activity} → {disease} | "
+        f"Skor kecocokan: {best_score}"
+    )
+
+    return best_row, status, best_score
 
 
 def extract_result(row, input_text, df):
@@ -2234,36 +2575,117 @@ def make_kg_graph(result):
 
 
 
+
 def build_relation_dataframe(result):
-    """Membuat triplet relasi dengan Zat Bioaktif sebagai fokus utama."""
+    """
+    Menampilkan relasi bioaktif lengkap.
+    Relasi utama menghubungkan langsung Nama Tanaman dengan
+    Kategori Penyakit.
+    """
     plant = result.get("Nama Tanaman", "Belum terdeteksi")
+    local_name = result.get(
+        "Nama Lokal/Daerah",
+        "Belum terdeteksi",
+    )
     latin = result.get("Nama Latin", "Belum terdeteksi")
-    local_name = result.get("Nama Lokal/Daerah", "Belum terdeteksi")
-    plant_part = result.get("Bagian Tanaman", "Belum terdeteksi")
-    compound = result.get("Zat Bioaktif", "Belum terdeteksi")
-    activity = result.get("Khasiat/Efek Terapeutik", "Belum terdeteksi")
-    disease = result.get("Kategori Penyakit", "Belum terdeteksi")
-    preparation = result.get("Cara Pengolahan", "Belum terdeteksi")
-    dose = result.get("Komposisi/Dosis", "Belum terdeteksi")
-    note = result.get("Keterangan", "Belum terdeteksi")
-    source = result.get("Sumber Data", "Belum terdeteksi")
+    plant_part = result.get(
+        "Bagian Tanaman",
+        "Belum terdeteksi",
+    )
+    compound = result.get(
+        "Zat Bioaktif",
+        "Belum terdeteksi",
+    )
+    activity = result.get(
+        "Khasiat/Efek Terapeutik",
+        "Belum terdeteksi",
+    )
+    disease = result.get(
+        "Kategori Penyakit",
+        "Belum terdeteksi",
+    )
+    preparation = result.get(
+        "Cara Pengolahan",
+        "Belum terdeteksi",
+    )
+    dose = result.get(
+        "Komposisi/Dosis",
+        "Belum terdeteksi",
+    )
+    note = result.get(
+        "Keterangan",
+        "Belum terdeteksi",
+    )
+    source = result.get(
+        "Sumber Data",
+        "Belum terdeteksi",
+    )
 
     relations = [
-        [plant, "mengandung zat bioaktif", compound],
-        [compound, "memiliki khasiat/efek terapeutik", activity],
-        [activity, "terkait dengan kategori penyakit", disease],
-        [compound, "ditemukan pada bagian tanaman", plant_part],
-        [compound, "didukung oleh sumber data", source],
-        [plant, "memiliki nama latin", latin],
-        [plant, "memiliki nama lokal/daerah", local_name],
-        [plant, "diolah dengan cara", preparation],
-        [plant, "memiliki komposisi/dosis", dose],
-        [plant, "memiliki keterangan", note],
+        [
+            plant,
+            "digunakan untuk membantu mengatasi",
+            disease,
+        ],
+        [
+            plant,
+            "mengandung zat bioaktif",
+            compound,
+        ],
+        [
+            compound,
+            "memiliki khasiat/efek terapeutik",
+            activity,
+        ],
+        [
+            activity,
+            "terkait dengan kategori penyakit",
+            disease,
+        ],
+        [
+            plant,
+            "memiliki nama lokal/daerah",
+            local_name,
+        ],
+        [
+            plant,
+            "memiliki nama Latin",
+            latin,
+        ],
+        [
+            plant,
+            "menggunakan bagian tanaman",
+            plant_part,
+        ],
+        [
+            plant,
+            "diolah dengan cara",
+            preparation,
+        ],
+        [
+            plant,
+            "memiliki komposisi/dosis",
+            dose,
+        ],
+        [
+            plant,
+            "memiliki keterangan",
+            note,
+        ],
+        [
+            plant,
+            "didukung oleh sumber data",
+            source,
+        ],
     ]
 
     return pd.DataFrame(
         relations,
-        columns=["Entitas Sumber", "Relasi", "Entitas Tujuan"],
+        columns=[
+            "Entitas Sumber",
+            "Relasi",
+            "Entitas Tujuan",
+        ],
     )
 
 
@@ -3433,8 +3855,8 @@ def render_analysis_form(prefix, allow_text=True, allow_upload=True):
             text_input = st.text_area(
                 "Nama tanaman atau kalimat",
                 placeholder=(
-                    "Contoh: Serai mengandung citronellal dan digunakan "
-                    "sebagai antimikroba."
+                    "Contoh: tanaman herbal untuk batuk, sakit kepala, diare, "
+                    "jantung, ginjal, kanker, atau ketik zat bioaktif."
                 ),
                 height=145,
                 key=f"{prefix}_text",
@@ -3450,7 +3872,10 @@ def render_analysis_form(prefix, allow_text=True, allow_upload=True):
     elif allow_text:
         text_input = st.text_area(
             "Nama tanaman atau kalimat",
-            placeholder="Contoh: Serai atau Cymbopogon nardus",
+            placeholder=(
+                "Contoh: tanaman herbal untuk batuk, sakit kepala, diare, "
+                "jantung, ginjal, kanker, atau ketik nama tanaman."
+            ),
             height=150,
             key=f"{prefix}_text",
         )
