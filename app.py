@@ -1,4 +1,4 @@
-import os
+mport os
 import re
 import html
 import base64
@@ -16,8 +16,8 @@ import plotly.express as px
 # KONFIGURASI APLIKASI
 # =========================================================
 APP_TITLE = "HyTBIONEX"
-APP_BUILD = "KARTU-BIOAKTIF-FINAL-2026-07-17"
-PREFERRED_DATASET = "DAta 20098 ok.xlsx"
+APP_BUILD = "METRIK-BIOAKTIF-SINKRON-2026-07-17"
+PREFERRED_DATASET = "Data set 20098+ Gambar.xlsx"
 ASSET_DIR = "assets"
 
 st.set_page_config(
@@ -2194,11 +2194,21 @@ def _count_complete_fields(row, columns):
     )
 
 
+
 def _score_known_disease_relation(row, target, columns):
     """
-    Skor hanya diberikan bila penyakit/keluhan benar-benar cocok
-    dengan Kategori Penyakit, Khasiat/Efek Terapeutik, atau Keterangan.
-    Tidak ada bonus untuk baris yang sama sekali tidak cocok.
+    Menilai relasi penyakit secara ketat.
+
+    ATURAN PENTING:
+    - Kategori_Penyakit menjadi sumber utama.
+    - Khasiat/Efek Terapeutik menjadi sumber pendukung.
+    - Keterangan TIDAK dipakai untuk menentukan penyakit karena bagian
+      tersebut dapat berisi peringatan, kontraindikasi, atau efek samping.
+
+    Contoh kesalahan yang dicegah:
+    Baris Buncis berkategori Diabetes Mellitus memiliki keterangan
+    'hati-hati pada penderita asam urat tinggi'. Baris itu tidak boleh
+    dipilih ketika pengguna menanyakan asam urat.
     """
     disease_text = value_from_row(
         row,
@@ -2208,70 +2218,88 @@ def _score_known_disease_relation(row, target, columns):
         row,
         columns.get("khasiat"),
     )
-    note_text = value_from_row(
-        row,
-        columns.get("keterangan"),
-    )
 
     score = 0
-    direct_hit = False
+    direct_category_hit = False
+    therapeutic_hit = False
 
-    for term in target["disease_terms"]:
-        if _phrase_in_normalized_text(term, disease_text):
-            score += 1600
-            direct_hit = True
+    matched_alias = clean_text(
+        target.get("matched_alias", "")
+    )
 
-        if _phrase_in_normalized_text(term, note_text):
-            score += 450
-            direct_hit = True
+    # 1. Kecocokan tepat dengan kata/frasa yang diketik pengguna
+    #    pada Kategori_Penyakit mendapat skor tertinggi.
+    if (
+        matched_alias
+        and _phrase_in_normalized_text(
+            matched_alias,
+            disease_text,
+        )
+    ):
+        score += 12000
+        direct_category_hit = True
 
-    for term in target["activity_terms"]:
-        if _phrase_in_normalized_text(term, activity_text):
-            score += 1100
-            direct_hit = True
+    # 2. Sinonim penyakit pada Kategori_Penyakit.
+    for term in target.get("disease_terms", []):
+        if _phrase_in_normalized_text(
+            term,
+            disease_text,
+        ):
+            score += 7000
+            direct_category_hit = True
 
-        if _phrase_in_normalized_text(term, disease_text):
-            score += 700
-            direct_hit = True
+    # 3. Aktivitas terapeutik yang benar-benar berhubungan.
+    for term in target.get("activity_terms", []):
+        if _phrase_in_normalized_text(
+            term,
+            activity_text,
+        ):
+            score += 4200
+            therapeutic_hit = True
 
-        if _phrase_in_normalized_text(term, note_text):
-            score += 350
-            direct_hit = True
+        # Beberapa dataset menempatkan aktivitas pada kolom kategori.
+        if _phrase_in_normalized_text(
+            term,
+            disease_text,
+        ):
+            score += 3000
+            direct_category_hit = True
 
-    if not direct_hit:
+    # 4. Ada dataset yang menulis nama penyakit langsung pada kolom khasiat.
+    for term in target.get("disease_terms", []):
+        if _phrase_in_normalized_text(
+            term,
+            activity_text,
+        ):
+            score += 2500
+            therapeutic_hit = True
+
+    # Baris tanpa kecocokan kategori atau khasiat tidak boleh dipilih.
+    if not direct_category_hit and not therapeutic_hit:
         return 0
 
-    # Istilah yang sama persis dengan kata pengguna mendapat prioritas.
-    matched_alias = target["matched_alias"]
-
-    if _phrase_in_normalized_text(
-        matched_alias,
-        disease_text,
-    ):
-        score += 900
-
-    if _phrase_in_normalized_text(
-        matched_alias,
-        activity_text,
-    ):
-        score += 650
+    # Prioritaskan relasi yang memiliki kategori penyakit langsung.
+    if direct_category_hit:
+        score += 1800
 
     return score
 
 
+
 def _score_fallback_relation(row, query_terms, columns):
     """
-    Pencarian untuk penyakit/keluhan yang belum ada pada kamus.
-    Baris harus mengandung istilah yang ditanyakan secara utuh.
+    Pencarian istilah yang belum ada pada kamus.
+
+    Keterangan tidak digunakan sebagai bukti penyakit karena dapat memuat
+    larangan, efek samping, atau kalimat 'hati-hati pada penderita ...'.
     """
     field_weights = [
-        ("penyakit", 1500),
-        ("khasiat", 1100),
-        ("keterangan", 600),
-        ("senyawa", 500),
-        ("nama", 450),
-        ("latin", 420),
-        ("lokal", 400),
+        ("penyakit", 1800),
+        ("khasiat", 1300),
+        ("senyawa", 700),
+        ("nama", 650),
+        ("latin", 620),
+        ("lokal", 600),
     ]
 
     score = 0
@@ -4057,39 +4085,10 @@ st.markdown(
 )
 
 
-# =========================================================
-# LOAD DATASET
-# =========================================================
-df_data, dataset_status = load_dataset(st.session_state.dataset_file)
-columns = get_column_map(df_data)
-
-total_rows = len(df_data)
-total_plants = (
-    df_data[columns["nama"]].astype(str).replace("", pd.NA).dropna().nunique()
-    if columns["nama"] else 0
-)
-total_compounds = (
-    df_data[columns["senyawa"]].astype(str).replace("", pd.NA).dropna().nunique()
-    if columns["senyawa"] else 0
-)
-total_effects = (
-    df_data[columns["khasiat"]].astype(str).replace("", pd.NA).dropna().nunique()
-    if columns["khasiat"] else 0
-)
-total_relations = total_rows * 10 if total_rows else 0
 
 # =========================================================
-# KOMPONEN TAMPILAN
+# STATISTIK SENYAWA BIOAKTIF — SATU SUMBER PERHITUNGAN
 # =========================================================
-def render_metrics():
-    metric_cols = st.columns(5)
-    metric_cols[0].metric("Total Baris", f"{total_rows:,}")
-    metric_cols[1].metric("Total Tanaman", f"{total_plants:,}")
-    metric_cols[2].metric("Senyawa Bioaktif", f"{total_compounds:,}")
-    metric_cols[3].metric("Aktivitas Biologis", f"{total_effects:,}")
-    metric_cols[4].metric("Relasi Triplet", f"{total_relations:,}")
-
-
 def get_bioactive_statistics(df, top_n=10):
     """Menghitung senyawa bioaktif unik dan frekuensi kemunculannya."""
     compound_col = get_column_map(df).get("senyawa")
@@ -4128,9 +4127,52 @@ def get_bioactive_statistics(df, top_n=10):
     return len(counter), pd.DataFrame(top_rows)
 
 
+# =========================================================
+# LOAD DATASET
+# =========================================================
+df_data, dataset_status = load_dataset(st.session_state.dataset_file)
+columns = get_column_map(df_data)
+
+total_rows = len(df_data)
+total_plants = (
+    df_data[columns["nama"]].astype(str).replace("", pd.NA).dropna().nunique()
+    if columns["nama"] else 0
+)
+# Angka ini dipakai bersama oleh kartu metrik atas dan kartu bioaktif utama.
+# Setiap sel dipisahkan menjadi senyawa individual, lalu dihitung unik
+# tanpa membedakan huruf besar dan kecil.
+total_compounds, top_compounds_dashboard = get_bioactive_statistics(
+    df_data,
+    top_n=10,
+)
+total_effects = (
+    df_data[columns["khasiat"]].astype(str).replace("", pd.NA).dropna().nunique()
+    if columns["khasiat"] else 0
+)
+total_relations = total_rows * 10 if total_rows else 0
+
+# =========================================================
+# KOMPONEN TAMPILAN
+# =========================================================
+def render_metrics():
+    metric_cols = st.columns(5)
+    metric_cols[0].metric("Total Baris", f"{total_rows:,}")
+    metric_cols[1].metric("Total Tanaman", f"{total_plants:,}")
+    metric_cols[2].metric("Senyawa Bioaktif Unik", f"{total_compounds:,}")
+    metric_cols[3].metric("Aktivitas Biologis", f"{total_effects:,}")
+    metric_cols[4].metric("Relasi Triplet", f"{total_relations:,}")
+
+
+
 def render_bioactive_dashboard():
-    """Menonjolkan senyawa bioaktif sebagai fokus utama dashboard."""
-    total_unique, top_compounds = get_bioactive_statistics(df_data, top_n=10)
+    """
+    Menonjolkan senyawa bioaktif sebagai fokus utama dashboard.
+
+    Angka pada kartu ini berasal dari variabel yang sama dengan metrik
+    "Senyawa Bioaktif Unik" di bagian atas, sehingga nilainya selalu sama.
+    """
+    total_unique = total_compounds
+    top_compounds = top_compounds_dashboard.copy()
 
     if not top_compounds.empty:
         chips = "".join(
@@ -4146,6 +4188,8 @@ def render_bioactive_dashboard():
 <div class="bioactive-number">{total_unique:,}</div>
 <div class="bioactive-description">
 Total senyawa bioaktif unik yang teridentifikasi pada dataset HyTBIONEX.
+Isi setiap sel dipisahkan menjadi senyawa individual, dibersihkan,
+lalu dideduplikasi tanpa membedakan huruf besar dan kecil.
 Senyawa bioaktif menjadi penghubung utama antara tanaman herbal,
 bagian tanaman, aktivitas biologis/efek terapeutik, dan sumber bukti.
 </div>
