@@ -16,7 +16,7 @@ import plotly.express as px
 # KONFIGURASI APLIKASI
 # =========================================================
 APP_TITLE = "HyTBIONEX"
-APP_BUILD = "METRIK-BIOAKTIF-SINKRON-2026-07-17"
+APP_BUILD = "HERBKG-LABEL-RAPI-2026-07-17"
 PREFERRED_DATASET = "Data set 20098+ Gambar.xlsx"
 ASSET_DIR = "assets"
 
@@ -40,6 +40,8 @@ DEFAULT_STATE = {
     "dashboard_text": "",
     "input_page_text": "",
     "upload_page_text": "",
+    "kg_result": None,
+    "kg_selected_plant": "",
 }
 
 for key, value in DEFAULT_STATE.items():
@@ -2834,7 +2836,93 @@ def make_top_value_chart(df, column, title, x_title, top_n=10):
     return fig
 
 
+
+
+def _wrap_kg_label(value, max_chars=16, max_lines=3):
+    """
+    Membungkus teks agar tetap berada di dalam lingkaran node.
+
+    Teks panjang dibatasi maksimal tiga baris. Isi lengkap tetap dapat
+    dilihat ketika kursor diarahkan ke node.
+    """
+    value = re.sub(r"\s+", " ", str(value or "")).strip()
+
+    if not value or _is_missing_value(value):
+        return "Belum<br>terdeteksi"
+
+    # Daftar panjang cukup menampilkan entitas awal.
+    items = [
+        item.strip()
+        for item in re.split(r"[,;|]+", value)
+        if item.strip()
+    ]
+
+    if len(items) > 1:
+        visible_value = ", ".join(items[:2])
+        if len(items) > 2:
+            visible_value += "…"
+    else:
+        visible_value = value
+
+    words = visible_value.split()
+    lines = []
+    current_line = ""
+
+    for word in words:
+        proposed = (
+            f"{current_line} {word}".strip()
+            if current_line
+            else word
+        )
+
+        if len(proposed) <= max_chars:
+            current_line = proposed
+            continue
+
+        if current_line:
+            lines.append(current_line)
+
+        current_line = word
+
+        if len(lines) >= max_lines - 1:
+            break
+
+    if current_line and len(lines) < max_lines:
+        lines.append(current_line)
+
+    consumed_words = sum(
+        len(line.split())
+        for line in lines
+    )
+
+    if consumed_words < len(words):
+        lines[-1] = lines[-1].rstrip(".,;:") + "…"
+
+    return "<br>".join(lines[:max_lines])
+
+
+def _kg_node_size(label, base_size=76):
+    """
+    Menyesuaikan ukuran lingkaran berdasarkan jumlah baris label.
+    """
+    line_count = max(
+        1,
+        str(label).count("<br>") + 1,
+    )
+
+    return base_size + ((line_count - 1) * 10)
+
+
 def make_kg_graph(result):
+    """
+    Membuat HerbKG 2.0 dengan tulisan rapi di dalam lingkaran.
+
+    Teks node:
+    - dibungkus menjadi maksimal tiga baris;
+    - dipotong secara aman bila terlalu panjang;
+    - tidak diletakkan di luar lingkaran;
+    - isi lengkap tersedia melalui hover.
+    """
     values = {
         "tanaman": result.get("Nama Tanaman", "Belum terdeteksi"),
         "latin": result.get("Nama Latin", "Belum terdeteksi"),
@@ -2842,93 +2930,132 @@ def make_kg_graph(result):
         "bagian": result.get("Bagian Tanaman", "Belum terdeteksi"),
         "senyawa": result.get("Zat Bioaktif", "Belum terdeteksi"),
         "khasiat": result.get(
-            "Khasiat/Efek Terapeutik", "Belum terdeteksi"
+            "Khasiat/Efek Terapeutik",
+            "Belum terdeteksi",
         ),
-        "pengolahan": result.get("Cara Pengolahan", "Belum terdeteksi"),
-        "dosis": result.get("Komposisi/Dosis", "Belum terdeteksi"),
-        "sumber": result.get("Sumber Data", "Belum terdeteksi"),
+        "penyakit": result.get(
+            "Kategori Penyakit",
+            "Belum terdeteksi",
+        ),
+        "pengolahan": result.get(
+            "Cara Pengolahan",
+            "Belum terdeteksi",
+        ),
+        "dosis": result.get(
+            "Komposisi/Dosis",
+            "Belum terdeteksi",
+        ),
+        "keterangan": result.get(
+            "Keterangan",
+            "Belum terdeteksi",
+        ),
+        "sumber": result.get(
+            "Sumber Data",
+            "Belum terdeteksi",
+        ),
     }
 
-    nodes = [
-        {
-            "id": "tanaman", "x": 0, "y": 0,
-            "label": short_label(values["tanaman"], 18),
-            "full": values["tanaman"],
-            "color": "#047857", "border": "#065f46", "size": 88,
-        },
-        {
-            "id": "latin", "x": -2.8, "y": 1.55,
-            "label": short_label(values["latin"], 25),
-            "full": values["latin"],
-            "color": "#e9d5ff", "border": "#9333ea", "size": 66,
-        },
-        {
-            "id": "lokal", "x": 0, "y": 2.25,
-            "label": short_label(values["lokal"], 23),
-            "full": values["lokal"],
-            "color": "#bfdbfe", "border": "#2563eb", "size": 66,
-        },
-        {
-            "id": "bagian", "x": 2.8, "y": 1.55,
-            "label": short_label(values["bagian"], 20),
-            "full": values["bagian"],
-            "color": "#bbf7d0", "border": "#047857", "size": 66,
-        },
-        {
-            "id": "senyawa", "x": -3.15, "y": 0,
-            "label": short_label(values["senyawa"], 28),
-            "full": values["senyawa"],
-            "color": "#fed7aa", "border": "#f97316", "size": 74,
-        },
-        {
-            "id": "pengolahan", "x": 3.15, "y": 0,
-            "label": short_label(values["pengolahan"], 28),
-            "full": values["pengolahan"],
-            "color": "#bbf7d0", "border": "#047857", "size": 72,
-        },
-        {
-            "id": "dosis", "x": -2.45, "y": -1.75,
-            "label": short_label(values["dosis"], 25),
-            "full": values["dosis"],
-            "color": "#fde68a", "border": "#d97706", "size": 70,
-        },
-        {
-            "id": "khasiat", "x": 0, "y": -2.25,
-            "label": short_label(values["khasiat"], 27),
-            "full": values["khasiat"],
-            "color": "#fbcfe8", "border": "#ec4899", "size": 76,
-        },
-        {
-            "id": "sumber", "x": 2.45, "y": -1.75,
-            "label": short_label(values["sumber"], 28),
-            "full": values["sumber"],
-            "color": "#e9d5ff", "border": "#9333ea", "size": 70,
-        },
+    node_specs = [
+        (
+            "tanaman", 0.0, 0.0, "Nama Tanaman",
+            "#047857", "#064e3b", 104, 17,
+        ),
+        (
+            "latin", -3.55, 2.55, "Nama Latin",
+            "#e9d5ff", "#9333ea", 82, 16,
+        ),
+        (
+            "lokal", -1.15, 3.25, "Nama Lokal/Daerah",
+            "#bfdbfe", "#2563eb", 82, 16,
+        ),
+        (
+            "bagian", 1.35, 3.18, "Bagian Tanaman",
+            "#bbf7d0", "#047857", 82, 15,
+        ),
+        (
+            "pengolahan", 3.55, 2.35, "Cara Pengolahan",
+            "#bbf7d0", "#047857", 86, 15,
+        ),
+        (
+            "dosis", 4.18, 0.15, "Komposisi/Dosis",
+            "#fde68a", "#d97706", 88, 15,
+        ),
+        (
+            "sumber", 3.35, -2.25, "Sumber Data",
+            "#e9d5ff", "#9333ea", 90, 15,
+        ),
+        (
+            "keterangan", 1.2, -3.28, "Keterangan",
+            "#ccfbf1", "#0f766e", 94, 16,
+        ),
+        (
+            "penyakit", -1.45, -3.22, "Kategori Penyakit",
+            "#fecdd3", "#e11d48", 90, 15,
+        ),
+        (
+            "khasiat", -3.55, -2.12, "Khasiat/Efek Terapeutik",
+            "#fbcfe8", "#ec4899", 90, 15,
+        ),
+        (
+            "senyawa", -4.22, 0.25, "Zat Bioaktif",
+            "#fed7aa", "#f97316", 96, 15,
+        ),
     ]
 
-    node_map = {node["id"]: node for node in nodes}
+    nodes = []
+
+    for (
+        node_id,
+        x,
+        y,
+        title,
+        color,
+        border,
+        base_size,
+        max_chars,
+    ) in node_specs:
+        label = _wrap_kg_label(
+            values[node_id],
+            max_chars=max_chars,
+            max_lines=3,
+        )
+
+        nodes.append(
+            {
+                "id": node_id,
+                "x": x,
+                "y": y,
+                "title": title,
+                "label": label,
+                "full": values[node_id],
+                "color": color,
+                "border": border,
+                "size": _kg_node_size(
+                    label,
+                    base_size=base_size,
+                ),
+            }
+        )
+
+    node_map = {
+        node["id"]: node
+        for node in nodes
+    }
 
     edges = [
-        ("tanaman", "latin", "nama latin"),
+        ("tanaman", "latin", "nama Latin"),
         ("tanaman", "lokal", "nama lokal/daerah"),
         ("tanaman", "bagian", "bagian digunakan"),
-        ("tanaman", "senyawa", "mengandung"),
         ("tanaman", "pengolahan", "cara pengolahan"),
         ("tanaman", "dosis", "dosis/komposisi"),
-        ("tanaman", "khasiat", "memiliki khasiat"),
         ("tanaman", "sumber", "sumber data"),
+        ("tanaman", "keterangan", "keterangan"),
+        ("tanaman", "penyakit", "membantu mengatasi"),
+        ("tanaman", "khasiat", "memiliki khasiat"),
+        ("tanaman", "senyawa", "mengandung"),
+        ("senyawa", "khasiat", "mendukung aktivitas"),
+        ("khasiat", "penyakit", "terkait penyakit"),
     ]
-
-    label_shift = {
-        "nama latin": (0, 12),
-        "nama lokal/daerah": (55, 0),
-        "bagian digunakan": (0, 12),
-        "mengandung": (0, 15),
-        "cara pengolahan": (0, 15),
-        "dosis/komposisi": (-5, 0),
-        "memiliki khasiat": (55, 0),
-        "sumber data": (5, 0),
-    }
 
     fig = go.Figure()
 
@@ -2936,77 +3063,185 @@ def make_kg_graph(result):
         source_node = node_map[source]
         target_node = node_map[target]
 
-        fig.add_trace(go.Scatter(
-            x=[source_node["x"], target_node["x"]],
-            y=[source_node["y"], target_node["y"]],
-            mode="lines",
-            line=dict(color="#94a3b8", width=2.5),
-            hoverinfo="none",
-            showlegend=False,
-        ))
+        # Garis relasi.
+        fig.add_trace(
+            go.Scatter(
+                x=[
+                    source_node["x"],
+                    target_node["x"],
+                ],
+                y=[
+                    source_node["y"],
+                    target_node["y"],
+                ],
+                mode="lines",
+                line=dict(
+                    color="#a3afbf",
+                    width=2.2,
+                ),
+                hoverinfo="none",
+                showlegend=False,
+            )
+        )
 
-        x_shift, y_shift = label_shift.get(relation, (0, 0))
+        # Kepala panah kecil di dekat node tujuan.
+        arrow_x = (
+            source_node["x"]
+            + 0.82
+            * (
+                target_node["x"]
+                - source_node["x"]
+            )
+        )
+        arrow_y = (
+            source_node["y"]
+            + 0.82
+            * (
+                target_node["y"]
+                - source_node["y"]
+            )
+        )
 
         fig.add_annotation(
-            x=(source_node["x"] + target_node["x"]) / 2,
-            y=(source_node["y"] + target_node["y"]) / 2,
+            x=arrow_x,
+            y=arrow_y,
+            ax=(
+                source_node["x"]
+                + 0.68
+                * (
+                    target_node["x"]
+                    - source_node["x"]
+                )
+            ),
+            ay=(
+                source_node["y"]
+                + 0.68
+                * (
+                    target_node["y"]
+                    - source_node["y"]
+                )
+            ),
+            xref="x",
+            yref="y",
+            axref="x",
+            ayref="y",
+            showarrow=True,
+            arrowhead=2,
+            arrowsize=1,
+            arrowwidth=1.7,
+            arrowcolor="#94a3b8",
+            text="",
+        )
+
+        # Label relasi dibuat kecil agar tidak menutup node.
+        label_x = (
+            source_node["x"]
+            + target_node["x"]
+        ) / 2
+        label_y = (
+            source_node["y"]
+            + target_node["y"]
+        ) / 2
+
+        fig.add_annotation(
+            x=label_x,
+            y=label_y,
             text=relation,
             showarrow=False,
-            xshift=x_shift,
-            yshift=y_shift,
-            font=dict(size=12, color="#111827"),
-            bgcolor="rgba(255,255,255,0.92)",
-            bordercolor="#dbe3ec",
+            font=dict(
+                size=10,
+                color="#27364a",
+                family="Arial",
+            ),
+            bgcolor="rgba(255,255,255,0.94)",
+            bordercolor="#d8e0e8",
             borderwidth=1,
-            borderpad=4,
+            borderpad=3,
         )
 
     for node in nodes:
-        hover_text = (
-            f"<b>{safe_text(node['label'])}</b>"
-            f"<br>{safe_text(node['full'])}"
+        is_center = node["id"] == "tanaman"
+
+        fig.add_trace(
+            go.Scatter(
+                x=[node["x"]],
+                y=[node["y"]],
+                mode="markers+text",
+                marker=dict(
+                    size=node["size"],
+                    color=node["color"],
+                    opacity=1,
+                    line=dict(
+                        color=node["border"],
+                        width=4.5 if is_center else 3.8,
+                    ),
+                ),
+                text=[node["label"]],
+                textposition="middle center",
+                textfont=dict(
+                    size=14 if is_center else 12,
+                    color=(
+                        "#ffffff"
+                        if is_center
+                        else "#172033"
+                    ),
+                    family=(
+                        "Arial Black"
+                        if is_center
+                        else "Arial"
+                    ),
+                ),
+                customdata=[
+                    [
+                        node["title"],
+                        node["full"],
+                    ]
+                ],
+                hovertemplate=(
+                    "<b>%{customdata[0]}</b>"
+                    "<br>%{customdata[1]}"
+                    "<extra></extra>"
+                ),
+                showlegend=False,
+                cliponaxis=False,
+            )
         )
 
-        fig.add_trace(go.Scatter(
-            x=[node["x"]],
-            y=[node["y"]],
-            mode="markers+text",
-            marker=dict(
-                size=node["size"],
-                color=node["color"],
-                line=dict(color=node["border"], width=4),
-            ),
-            text=[node["label"]],
-            textposition="middle center",
-            textfont=dict(
-                size=13,
-                color="#111111",
-                family="Arial Black",
-            ),
-            hovertext=[hover_text],
-            hoverinfo="text",
-            showlegend=False,
-            cliponaxis=False,
-        ))
-
     fig.update_layout(
-        height=720,
-        plot_bgcolor="#fbf7ff",
-        paper_bgcolor="#fbf7ff",
-        margin=dict(l=20, r=20, t=30, b=30),
-        xaxis=dict(visible=False, range=[-4.2, 4.2], fixedrange=True),
-        yaxis=dict(visible=False, range=[-3.0, 2.9], fixedrange=True),
-        dragmode=False,
+        height=860,
+        plot_bgcolor="#fbf9ff",
+        paper_bgcolor="#fbf9ff",
+        margin=dict(
+            l=35,
+            r=35,
+            t=45,
+            b=35,
+        ),
+        xaxis=dict(
+            visible=False,
+            range=[-5.05, 5.05],
+            fixedrange=False,
+        ),
+        yaxis=dict(
+            visible=False,
+            range=[-4.15, 4.05],
+            fixedrange=False,
+            scaleanchor="x",
+            scaleratio=0.82,
+        ),
+        dragmode="pan",
         hoverlabel=dict(
             bgcolor="white",
+            bordercolor="#d1d5db",
             font_size=13,
             font_family="Arial",
+        ),
+        font=dict(
+            family="Arial",
         ),
     )
 
     return fig
-
-
 
 
 def build_relation_dataframe(result):
@@ -4573,21 +4808,328 @@ def render_relation_table(result, key_prefix):
     )
 
 
+
 def render_kg_section(result, chart_key):
     st.markdown(
         '<div class="section-title">🕸️ HerbKG 2.0 Explorer</div>',
         unsafe_allow_html=True,
     )
+
+    st.caption(
+        "Arahkan kursor ke node untuk melihat informasi lengkap. "
+        "Graf dapat diperbesar, diperkecil, dan digeser."
+    )
+
     st.plotly_chart(
         make_kg_graph(result),
         use_container_width=True,
         key=chart_key,
         config={
             "displayModeBar": True,
-            "scrollZoom": False,
+            "scrollZoom": True,
             "displaylogo": False,
+            "doubleClick": "reset",
+            "modeBarButtonsToRemove": [
+                "lasso2d",
+                "select2d",
+            ],
         },
     )
+
+
+def _herbkg_working_dataframe(df):
+    """
+    Menyiapkan dataset khusus HerbKG tanpa mengubah dataset utama.
+    Identitas tanaman diteruskan ke baris berikutnya bila Excel memakai
+    format sel bertingkat.
+    """
+    if df is None or df.empty:
+        return pd.DataFrame()
+
+    columns = get_column_map(df)
+
+    try:
+        return _prepare_relation_search_dataframe(
+            df,
+            columns,
+        )
+    except Exception:
+        return df.copy()
+
+
+def _herbkg_plant_options(df):
+    working = _herbkg_working_dataframe(df)
+
+    if working.empty:
+        return []
+
+    columns = get_column_map(working)
+    name_column = columns.get("nama")
+
+    if not name_column:
+        return []
+
+    values = (
+        working[name_column]
+        .astype(str)
+        .str.strip()
+        .replace({
+            "": pd.NA,
+            "nan": pd.NA,
+            "None": pd.NA,
+            "Belum terdeteksi": pd.NA,
+        })
+        .dropna()
+        .tolist()
+    )
+
+    return sorted(
+        _unique_preserve_order(values),
+        key=lambda value: clean_text(value),
+    )
+
+
+def _herbkg_rows_for_plant(df, plant_name):
+    working = _herbkg_working_dataframe(df)
+
+    if working.empty:
+        return pd.DataFrame()
+
+    columns = get_column_map(working)
+    name_column = columns.get("nama")
+
+    if not name_column:
+        return pd.DataFrame()
+
+    target = clean_text(plant_name)
+
+    mask = (
+        working[name_column]
+        .astype(str)
+        .map(clean_text)
+        .eq(target)
+    )
+
+    return working.loc[mask].copy()
+
+
+def render_herbkg_explorer_page():
+    """
+    Halaman HerbKG yang benar-benar aktif.
+
+    Pengguna dapat:
+    1. memakai hasil ekstraksi terakhir;
+    2. memilih tanaman langsung dari dataset;
+    3. menampilkan graf;
+    4. melihat dan mengunduh triplet relasinya.
+    """
+    st.markdown(
+        '<div class="section-title">🕸️ HerbKG 2.0 Explorer Aktif</div>',
+        unsafe_allow_html=True,
+    )
+
+    st.info(
+        "Pilih sumber data, kemudian tekan tombol "
+        "“Tampilkan HerbKG”. Semua node berasal dari satu tanaman "
+        "dan relasi yang sama."
+    )
+
+    plant_options = _herbkg_plant_options(df_data)
+    has_last_result = bool(
+        st.session_state.last_result
+    )
+
+    source_options = [
+        "Pilih tanaman dari dataset",
+    ]
+
+    if has_last_result:
+        source_options.insert(
+            0,
+            "Gunakan hasil ekstraksi terakhir",
+        )
+
+    source_mode = st.radio(
+        "Sumber HerbKG",
+        options=source_options,
+        horizontal=True,
+        key="herbkg_source_mode",
+    )
+
+    left, right = st.columns(
+        [2.2, 1],
+        vertical_alignment="bottom",
+    )
+
+    selected_plant = ""
+
+    with left:
+        if source_mode == "Pilih tanaman dari dataset":
+            if plant_options:
+                default_index = 0
+
+                previous = str(
+                    st.session_state.get(
+                        "kg_selected_plant",
+                        "",
+                    )
+                ).strip()
+
+                if previous in plant_options:
+                    default_index = plant_options.index(
+                        previous
+                    )
+
+                selected_plant = st.selectbox(
+                    "Pilih nama tanaman",
+                    options=plant_options,
+                    index=default_index,
+                    key="herbkg_plant_selectbox",
+                    help=(
+                        "Tanaman diambil dari kolom Nama_Tanaman "
+                        "pada dataset aktif."
+                    ),
+                )
+            else:
+                st.warning(
+                    "Nama tanaman belum ditemukan pada dataset."
+                )
+        else:
+            current_plant = (
+                st.session_state.last_result.get(
+                    "Nama Tanaman",
+                    "Belum terdeteksi",
+                )
+            )
+
+            st.text_input(
+                "Tanaman hasil ekstraksi",
+                value=current_plant,
+                disabled=True,
+                key="herbkg_last_plant_display",
+            )
+
+    with right:
+        show_kg = st.button(
+            "🕸️ Tampilkan HerbKG",
+            type="primary",
+            use_container_width=True,
+            key="activate_herbkg_button",
+        )
+
+    if show_kg:
+        if (
+            source_mode
+            == "Gunakan hasil ekstraksi terakhir"
+        ):
+            st.session_state.kg_result = dict(
+                st.session_state.last_result
+            )
+            st.session_state.kg_selected_plant = (
+                st.session_state.last_result.get(
+                    "Nama Tanaman",
+                    "",
+                )
+            )
+        elif selected_plant:
+            selected_rows = _herbkg_rows_for_plant(
+                df_data,
+                selected_plant,
+            )
+
+            if selected_rows.empty:
+                st.session_state.kg_result = None
+                st.error(
+                    "Data tanaman yang dipilih tidak ditemukan."
+                )
+            else:
+                st.session_state.kg_result = (
+                    merge_rows_to_result(
+                        selected_rows,
+                        df_data,
+                    )
+                )
+                st.session_state.kg_selected_plant = (
+                    selected_plant
+                )
+
+    result = st.session_state.get("kg_result")
+
+    # Saat pertama kali membuka HerbKG, hasil ekstraksi terakhir
+    # langsung dapat digunakan sebagai tampilan awal.
+    if (
+        result is None
+        and has_last_result
+        and source_mode
+        == "Gunakan hasil ekstraksi terakhir"
+    ):
+        result = dict(
+            st.session_state.last_result
+        )
+
+    if result:
+        plant_name = result.get(
+            "Nama Tanaman",
+            "Belum terdeteksi",
+        )
+        disease = result.get(
+            "Kategori Penyakit",
+            "Belum terdeteksi",
+        )
+        compound = result.get(
+            "Zat Bioaktif",
+            "Belum terdeteksi",
+        )
+
+        summary_cols = st.columns(3)
+        summary_cols[0].metric(
+            "Tanaman",
+            short_label(plant_name, 24),
+        )
+        summary_cols[1].metric(
+            "Kategori Penyakit",
+            short_label(disease, 24),
+        )
+        summary_cols[2].metric(
+            "Zat Bioaktif",
+            short_label(compound, 24),
+        )
+
+        render_kg_section(
+            result,
+            chart_key="herbkg_active_chart",
+        )
+
+        relation_df = build_relation_dataframe(
+            result
+        )
+
+        with st.expander(
+            "🔗 Lihat Triplet Relasi HerbKG",
+            expanded=False,
+        ):
+            st.dataframe(
+                relation_df,
+                use_container_width=True,
+                hide_index=True,
+            )
+
+            st.download_button(
+                "⬇️ Unduh Triplet HerbKG CSV",
+                data=relation_df.to_csv(
+                    index=False
+                ).encode("utf-8"),
+                file_name=(
+                    f"HerbKG_{slugify_filename(plant_name)}.csv"
+                ),
+                mime="text/csv",
+                key="download_active_herbkg",
+            )
+    else:
+        st.warning(
+            "Pilih tanaman atau jalankan ekstraksi terlebih dahulu, "
+            "kemudian tekan tombol Tampilkan HerbKG."
+        )
 
 
 def render_descriptive_charts(key_prefix):
@@ -5303,16 +5845,7 @@ elif page == "🔗 Relasi Ekstraksi":
         )
 
 elif page == "🕸️ HerbKG 2.0 Explorer":
-    if st.session_state.last_result:
-        render_kg_section(
-            st.session_state.last_result,
-            chart_key="kg_explorer_main",
-        )
-    else:
-        st.info(
-            "Belum ada hasil ekstraksi. Berikut contoh Knowledge Graph."
-        )
-        render_preview_kg()
+    render_herbkg_explorer_page()
 
 elif page == "📦 Ringkasan Downstream":
     render_downstream_overview()
