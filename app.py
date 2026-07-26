@@ -17,7 +17,7 @@ import plotly.express as px
 # =========================================================
 APP_TITLE = "HyTBIONEX"
 APP_BUILD = "HERBKG-LABEL-RAPI-2026-07-17"
-PREFERRED_DATASET = "Data set 20098+ Gambar.xlsx"
+PREFERRED_DATASET = "Dataset_Herbal_20100_OK.xlsx"
 ASSET_DIR = "assets"
 
 st.set_page_config(
